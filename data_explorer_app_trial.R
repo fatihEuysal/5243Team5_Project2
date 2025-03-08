@@ -116,12 +116,38 @@ ui <- fluidPage(
              # 1.4 Feature Engineering Part
              tabPanel("Feature Engineering", sidebarLayout(
                sidebarPanel(
-                 h4("Create New Feature"),
-                 textInput("newFeatureName", "New Feature Name:"),
-                 textInput("newFeatureExpr", "Expression (use column names, e.g., mpg * wt):"),
-                 actionButton("addFeature", "Add Feature")
+                 h4("Feature Engineering Options"),
+                 
+                 # Select mathematical transformations
+                 checkboxGroupInput("mathTransform", "Mathematical Transformations:",
+                                    choices = c("Log" = "log", "Square Root" = "sqrt", "Square" = "square")),
+                 
+                 # Select time feature extraction
+                 checkboxInput("extractTimeFeatures", "Extract Time Features", value = FALSE),
+                 
+                 # Select text feature extraction
+                 checkboxInput("extractTextFeatures", "Extract Text Features (Word Count, Character Count)", value = FALSE),
+                 
+                 # Select statistical feature generation
+                 checkboxInput("generateStats", "Generate Statistical Features (Mean, Variance, etc.)", value = FALSE),
+                 
+                 # Select feature selection methods
+                 checkboxGroupInput("featureSelection", "Feature Selection Methods:",
+                                    choices = c("Variance Threshold" = "var_thresh", 
+                                                "Correlation Analysis" = "corr",
+                                                "Lasso Regularization" = "lasso")),
+                 
+                 # Select dimensionality reduction methods
+                 checkboxGroupInput("dimReduction", "Dimensionality Reduction:",
+                                    choices = c("PCA" = "pca", "LDA" = "lda", "t-SNE" = "tsne")),
+                 
+                 actionButton("applyFeatureEng", "Apply Feature Engineering")
                ),
-               mainPanel(DTOutput("featurePreview"))
+               
+               mainPanel(
+                 h4("Feature Engineered Data"),
+                 DTOutput("featureEngPreview")
+               )
              )),
              
              # 1.5 Exploratory Data Analysis Part
@@ -236,13 +262,116 @@ server <- function(input, output, session) {
   output$cleanPreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned, options = list(scrollX = TRUE)) })
   
   # 2.4 Feature Engineering Server
-  observeEvent(input$addFeature, {
-    req(rv$cleaned, input$newFeatureName, input$newFeatureExpr)
-    new_feature <- try(with(rv$cleaned, eval(parse(text = input$newFeatureExpr))), silent = TRUE)
-    if (!inherits(new_feature, "try-error")) rv$cleaned[[input$newFeatureName]] <- new_feature
+  observeEvent(input$applyFeatureEng, {
+    req(rv$cleaned)  # Ensure data is loaded
+    data <- rv$cleaned  # Copy data
+    
+    # Mathematical transformations
+    if ("log" %in% input$mathTransform) {
+      data <- data %>% mutate(across(where(is.numeric), ~ log(. + 1)))
+    }
+    if ("sqrt" %in% input$mathTransform) {
+      data <- data %>% mutate(across(where(is.numeric), sqrt))
+    }
+    if ("square" %in% input$mathTransform) {
+      data <- data %>% mutate(across(where(is.numeric), ~ .^2))
+    }
+    
+    # Time feature extraction (Fixed for-loop)
+    if (input$extractTimeFeatures) {
+      date_cols <- names(select(data, where(lubridate::is.Date)))
+      if (length(date_cols) > 0) {
+        for (col in date_cols) {
+          data[[paste0(col, "_year")]] <- lubridate::year(data[[col]])
+          data[[paste0(col, "_month")]] <- lubridate::month(data[[col]])
+          data[[paste0(col, "_day")]] <- lubridate::day(data[[col]])
+          data[[paste0(col, "_weekday")]] <- lubridate::wday(data[[col]], label = TRUE)
+        } 
+      } 
+    } 
+    
+    # Text feature extraction
+    if (input$extractTextFeatures) {
+      text_cols <- names(select(data, where(is.character)))
+      if (length(text_cols) > 0) {
+        for (col in text_cols) {
+          data[[paste0(col, "_word_count")]] <- str_count(data[[col]], "\\S+")
+          data[[paste0(col, "_char_count")]] <- nchar(data[[col]])
+        }
+      }
+    }
+    
+    # Statistical features
+    if (input$generateStats) {
+      num_cols <- names(select(data, where(is.numeric)))
+      if (length(num_cols) > 0) {
+        for (col in num_cols) {
+          data[[paste0(col, "_mean")]] <- mean(data[[col]], na.rm = TRUE)
+          data[[paste0(col, "_var")]] <- var(data[[col]], na.rm = TRUE)
+          data[[paste0(col, "_median")]] <- median(data[[col]], na.rm = TRUE)
+          data[[paste0(col, "_min")]] <- min(data[[col]], na.rm = TRUE)
+          data[[paste0(col, "_max")]] <- max(data[[col]], na.rm = TRUE)
+        }
+      }
+    }
+    
+    # Feature selection
+    if ("var_thresh" %in% input$featureSelection) {
+      variances <- apply(select(data, where(is.numeric)), 2, var)
+      data <- data[, variances > 0.01, drop = FALSE]  # Remove low-variance features
+    }
+    
+    if ("corr" %in% input$featureSelection) {
+      corr_matrix <- cor(select(data, where(is.numeric)), use = "pairwise.complete.obs")
+      high_corr <- findCorrelation(corr_matrix, cutoff = 0.8)  # Correlation > 0.8
+      data <- data[, -high_corr, drop = FALSE]
+    }
+    
+    if ("lasso" %in% input$featureSelection) {
+      if (requireNamespace("glmnet", quietly = TRUE)) {
+        num_data <- select(data, where(is.numeric))
+        x <- as.matrix(num_data)
+        y <- rep(1, nrow(data))  # LASSO requires a target variable, using a default placeholder
+        lasso_model <- glmnet::cv.glmnet(x, y, alpha = 1)
+        selected_features <- coef(lasso_model, s = "lambda.min")[-1, ]  # Select non-zero features
+        data <- data[, names(selected_features), drop = FALSE]
+      } else {
+        showNotification("Lasso Regularization requires 'glmnet' package.", type = "error")
+      }
+    }
+    
+    # Dimensionality reduction
+    if ("pca" %in% input$dimReduction) {
+      pca_result <- prcomp(select(data, where(is.numeric)), scale. = TRUE)
+      data <- as.data.frame(pca_result$x[, 1:2])  # Keep only the first 2 principal components
+    }
+    
+    if ("lda" %in% input$dimReduction) {
+      if (requireNamespace("MASS", quietly = TRUE)) {
+        lda_result <- MASS::lda(select(data, where(is.numeric)), grouping = rep(1, nrow(data))) 
+        data <- as.data.frame(predict(lda_result)$x)
+      } else {
+        showNotification("LDA requires 'MASS' package.", type = "error")
+      }
+    }
+    
+    if ("tsne" %in% input$dimReduction) {
+      if (requireNamespace("Rtsne", quietly = TRUE)) {
+        tsne_result <- Rtsne::Rtsne(select(data, where(is.numeric)))
+        data <- as.data.frame(tsne_result$Y)
+      } else {
+        showNotification("t-SNE requires 'Rtsne' package.", type = "error")
+      }
+    }
+    
+    # Update feature-engineered data
+    rv$cleaned <- data
+    output$featureEngPreview <- renderDT({ datatable(data) })
+    
+    showNotification("Feature Engineering Applied Successfully", type = "message")
   })
-  output$featurePreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned) })
 }
+  
 
   # 2.5 Exploratory Data Analysis Server
 
