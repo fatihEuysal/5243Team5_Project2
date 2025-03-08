@@ -11,6 +11,9 @@ library(readxl)    # For Excel
 library(jsonlite)  # For JSON
 library(ggplot2)
 library(plotly)    # For interactive plots
+library(lubridate) # Date handling
+library(ggcorrplot) # Correlation plot
+
 
 # 1. Define UI
 ui <- fluidPage(
