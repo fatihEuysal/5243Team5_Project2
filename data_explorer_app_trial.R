@@ -145,8 +145,11 @@ ui <- fluidPage(
                ),
                
                mainPanel(
-                 h4("Feature Engineered Data"),
-                 DTOutput("featureEngPreview")
+                 h4("Preview: Before & After Feature Engineering"),
+                 tabsetPanel(
+                   tabPanel("Before Feature Engineering", DTOutput("beforeFeatureEngPreview")),
+                   tabPanel("After Feature Engineering", DTOutput("featureEngPreview"))
+                 )
                )
              )),
              
@@ -173,7 +176,7 @@ ui <- fluidPage(
 
 # 2. Define Server logic
 server <- function(input, output, session) {
-  rv <- reactiveValues(data = NULL, cleaned = NULL)
+  rv <- reactiveValues(data = NULL, cleaned = NULL, featured = NULL)
   
   # 2.1 Data Load Server
   observeEvent(input$loadData, {
@@ -192,20 +195,22 @@ server <- function(input, output, session) {
     }
   })
   
+  # Display Data Preview & Data Structure
   output$dataPreview <- renderDT({ req(rv$data); datatable(rv$data) })
   output$dataStructure <- renderPrint({ req(rv$data); str(rv$data) })
+  
+  # Display Before Clean Preview
+  output$beforeCleanPreview <- renderDT({ req(rv$data); datatable(rv$data, options = list(scrollX = TRUE)) })
   
   # 2.3 Data Cleaning & Preprocessing Server
   observeEvent(input$clean, {
     req(rv$data)
     data <- rv$data
     
-    # Remove duplicate values
+    # Data cleaning (removing duplicates, handling missing values, handling outliers, etc.)
     if (input$removeDup) {
       data <- distinct(data)
     }
-    
-    # Handle missing values
     if (input$handleMissing) {
       if (input$missOpt == "remove") {
         data <- na.omit(data)
@@ -240,44 +245,50 @@ server <- function(input, output, session) {
       }
     }
     
-    # Normalize numerical data
+    # Normalization
     if (input$normalizeData) {
-      data <- data %>% mutate(across(where(is.numeric), ~ ( . - min(. ,na.rm = TRUE)) / (max(.) - min(.))))
+      data <- data %>% mutate(across(where(is.numeric), ~ ( . - min(., na.rm = TRUE)) / (max(., na.rm = TRUE) - min(., na.rm = TRUE))))
     }
     
-    # Encode categorical variables (One-Hot Encoding or Label Encoding)
+    # Categorical encoding
     if (input$encodeCategorical) {
       data <- data %>% mutate(across(where(is.character), as.factor))
     }
     
-    # Save cleaned data
+    # Update cleaned data
     rv$cleaned <- data
     
     # Send notification
     showNotification("Data cleaned successfully", type = "message")
   })
+
   
-  # Display data before and after cleaning
-  output$beforeCleanPreview <- renderDT({ req(rv$data); datatable(rv$data, options = list(scrollX = TRUE)) })
+  # Display data after cleaning
   output$cleanPreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned, options = list(scrollX = TRUE)) })
+  
+  # Display data before feature engneering
+  output$beforeFeatureEngPreview <- renderDT({ datatable(rv$cleaned, options = list(scrollX = TRUE)) })
+  
   
   # 2.4 Feature Engineering Server
   observeEvent(input$applyFeatureEng, {
-    req(rv$cleaned)  # Ensure data is loaded
-    data <- rv$cleaned  # Copy data
+    req(rv$cleaned)  # Cleaned data
+    data <- rv$cleaned  # Start Feature Engineering from cleaned data  
     
     # Mathematical transformations
-    if ("log" %in% input$mathTransform) {
-      data <- data %>% mutate(across(where(is.numeric), ~ log(. + 1)))
-    }
-    if ("sqrt" %in% input$mathTransform) {
-      data <- data %>% mutate(across(where(is.numeric), sqrt))
-    }
-    if ("square" %in% input$mathTransform) {
-      data <- data %>% mutate(across(where(is.numeric), ~ .^2))
+    if (!is.null(input$mathTransform)) {
+      if ("log" %in% input$mathTransform) {
+        data <- data %>% mutate(across(where(is.numeric), ~ log(. + 1), .names = "log_{.col}"))
+      }
+      if ("sqrt" %in% input$mathTransform) {
+        data <- data %>% mutate(across(where(is.numeric), sqrt, .names = "sqrt_{.col}"))
+      }
+      if ("square" %in% input$mathTransform) {
+        data <- data %>% mutate(across(where(is.numeric), ~ .^2, .names = "square_{.col}"))
+      }
     }
     
-    # Time feature extraction (Fixed for-loop)
+    # Time feature extraction
     if (input$extractTimeFeatures) {
       date_cols <- names(select(data, where(lubridate::is.Date)))
       if (length(date_cols) > 0) {
@@ -286,9 +297,9 @@ server <- function(input, output, session) {
           data[[paste0(col, "_month")]] <- lubridate::month(data[[col]])
           data[[paste0(col, "_day")]] <- lubridate::day(data[[col]])
           data[[paste0(col, "_weekday")]] <- lubridate::wday(data[[col]], label = TRUE)
-        } 
-      } 
-    } 
+        }
+      }
+    }
     
     # Text feature extraction
     if (input$extractTextFeatures) {
@@ -316,57 +327,33 @@ server <- function(input, output, session) {
     }
     
     # Feature selection
-    if ("var_thresh" %in% input$featureSelection) {
-      variances <- apply(select(data, where(is.numeric)), 2, var)
-      data <- data[, variances > 0.01, drop = FALSE]  # Remove low-variance features
-    }
-    
-    if ("corr" %in% input$featureSelection) {
-      corr_matrix <- cor(select(data, where(is.numeric)), use = "pairwise.complete.obs")
-      high_corr <- findCorrelation(corr_matrix, cutoff = 0.8)  # Correlation > 0.8
-      data <- data[, -high_corr, drop = FALSE]
-    }
-    
-    if ("lasso" %in% input$featureSelection) {
-      if (requireNamespace("glmnet", quietly = TRUE)) {
-        num_data <- select(data, where(is.numeric))
-        x <- as.matrix(num_data)
-        y <- rep(1, nrow(data))  # LASSO requires a target variable, using a default placeholder
-        lasso_model <- glmnet::cv.glmnet(x, y, alpha = 1)
-        selected_features <- coef(lasso_model, s = "lambda.min")[-1, ]  # Select non-zero features
-        data <- data[, names(selected_features), drop = FALSE]
-      } else {
-        showNotification("Lasso Regularization requires 'glmnet' package.", type = "error")
+    if (!is.null(input$featureSelection)) {
+      if ("var_thresh" %in% input$featureSelection) {
+        variances <- apply(select(data, where(is.numeric)), 2, var)
+        low_var_cols <- names(variances[variances <= 0.01])
+        data <- select(data, -all_of(low_var_cols))  # Remove low-variance features
+      }
+      
+      if ("corr" %in% input$featureSelection) {
+        corr_matrix <- cor(select(data, where(is.numeric)), use = "pairwise.complete.obs")
+        high_corr <- caret::findCorrelation(corr_matrix, cutoff = 0.8)  # Correlation > 0.8
+        data <- data[, -high_corr, drop = FALSE]
       }
     }
     
     # Dimensionality reduction
-    if ("pca" %in% input$dimReduction) {
-      pca_result <- prcomp(select(data, where(is.numeric)), scale. = TRUE)
-      data <- as.data.frame(pca_result$x[, 1:2])  # Keep only the first 2 principal components
-    }
-    
-    if ("lda" %in% input$dimReduction) {
-      if (requireNamespace("MASS", quietly = TRUE)) {
-        lda_result <- MASS::lda(select(data, where(is.numeric)), grouping = rep(1, nrow(data))) 
-        data <- as.data.frame(predict(lda_result)$x)
-      } else {
-        showNotification("LDA requires 'MASS' package.", type = "error")
+    if (!is.null(input$dimReduction)) {
+      if ("pca" %in% input$dimReduction) {
+        pca_result <- prcomp(select(data, where(is.numeric)), scale. = TRUE)
+        pca_df <- as.data.frame(pca_result$x[, 1:2])  # Keep only the first 2 principal components
+        colnames(pca_df) <- c("PCA_1", "PCA_2")
+        data <- cbind(data, pca_df)  # Append dimensionality reduction features
       }
     }
     
-    if ("tsne" %in% input$dimReduction) {
-      if (requireNamespace("Rtsne", quietly = TRUE)) {
-        tsne_result <- Rtsne::Rtsne(select(data, where(is.numeric)))
-        data <- as.data.frame(tsne_result$Y)
-      } else {
-        showNotification("t-SNE requires 'Rtsne' package.", type = "error")
-      }
-    }
-    
-    # Update feature-engineered data
-    rv$cleaned <- data
-    output$featureEngPreview <- renderDT({ datatable(data) })
+    # Update Feature Engineering results
+    rv$featured <- data
+    output$featureEngPreview <- renderDT({ datatable(rv$featured, options = list(scrollX = TRUE)) })
     
     showNotification("Feature Engineering Applied Successfully", type = "message")
   })
