@@ -18,22 +18,27 @@ ui <- fluidPage(
   useShinyjs(),                  # Enable shinyjs for extra interactivity
   titlePanel("Data Explorer & Comparison Tool"),
   navbarPage("",
+             
+             # 1.1 User Guide Part
              tabPanel("User Guide", fluidRow(
                column(12,
                       h3("Overview"),
-                      p("This web application allows users to upload datasets..."),
+                      p("This web application is designed to provide an interactive and user-friendly platform for data analysis, enabling users to seamlessly upload, clean, preprocess, engineer features, and explore datasets.. It provides an interactive and user-friendly platform for data analysis, allowing users to seamlessly upload, clean, preprocess, engineer features, and explore datasets. The app is designed to support data scientists and analysts by simplifying data handling and visualization."),
                       h4("Key Features:"),
                       tags$ul(
-                        tags$li("Upload datasets in various formats..."),
-                        tags$li("Interactive data cleaning..."),
-                        tags$li("Feature Engineering..."),
-                        tags$li("Exploratory Data Analysis (EDA)..."),
-                        tags$li("Download cleaned/processed datasets")
+                        tags$li("Upload datasets in various formats (CSV, Excel, JSON, RDS) or use built-in sample datasets"),
+                        tags$li("Interactive data cleaning: handling missing values, removing duplicates, and applying transformations"),
+                        tags$li("Feature Engineering: Create new variables dynamically using custom expressions"),
+                        tags$li("Exploratory Data Analysis (EDA): Generate interactive visualizations and statistical summaries"),
+                        tags$li("Download cleaned/processed datasets for further analysis"),
+                        tags$li("Responsive and user-friendly interface for smooth data exploration")
                       ),
                       h4("Navigation:"),
-                      p("Use the tabs to navigate...")
+                      p("Use the tabs to navigate between Data Upload, Data Cleaning, Feature Engineering, EDA, and Download sections.")
                )
              )),
+             
+             # 1.2 Data Upload part
              tabPanel("Data Upload", sidebarLayout(
                sidebarPanel(
                  radioButtons("dataSource", "Data Source:",
@@ -58,6 +63,8 @@ ui <- fluidPage(
                  verbatimTextOutput("dataStructure")
                )
              )),
+             
+             # 1.3 Data Cleaning & Preprocessing Part
              tabPanel("Data Cleaning & Preprocessing", sidebarLayout(
                sidebarPanel(
                  h4("Cleaning Options"),
@@ -69,6 +76,8 @@ ui <- fluidPage(
                ),
                mainPanel(DTOutput("cleanPreview"))
              )),
+             
+             # 1.4 Feature Engineering Part
              tabPanel("Feature Engineering", sidebarLayout(
                sidebarPanel(
                  h4("Create New Feature"),
@@ -78,6 +87,8 @@ ui <- fluidPage(
                ),
                mainPanel(DTOutput("featurePreview"))
              )),
+             
+             # 1.5 Exploratory Data Analysis Part
              tabPanel("Exploratory Data Analysis", sidebarLayout(
                sidebarPanel(
                  h4("Select Plot Type"),
@@ -89,6 +100,8 @@ ui <- fluidPage(
                ),
                mainPanel(plotlyOutput("edaPlot"), verbatimTextOutput("summaryStats"))
              )),
+             
+             # 1.6 Download & Reset Part
              tabPanel("Download & Reset", fluidRow(
                column(6, downloadButton("downloadData", "Download Processed Data")),
                column(6, actionButton("reset", "Reset App"))
