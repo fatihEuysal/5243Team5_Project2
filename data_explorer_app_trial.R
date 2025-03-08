@@ -69,13 +69,48 @@ ui <- fluidPage(
              tabPanel("Data Cleaning & Preprocessing", sidebarLayout(
                sidebarPanel(
                  h4("Cleaning Options"),
+                 
+                 # 1.3.1 Choose whether to remove duplicate values
                  checkboxInput("removeDup", "Remove duplicate rows", value = TRUE),
-                 radioButtons("missOpt", "Missing Value Handling:",
-                              choices = c("Remove Rows" = "remove", "Impute with Mean/Mode" = "impute"),
-                              selected = "remove"),
+                 
+                 # 1.3.2 Options for handling missing values
+                 checkboxInput("handleMissing", "Handle Missing Values", value = FALSE),  # Checkbox
+                 conditionalPanel(
+                   condition = "input.handleMissing == true",  # Display only when checked
+                   radioButtons("missOpt", label = NULL,
+                                choices = c("Remove Rows" = "remove", 
+                                            "Impute with Mean" = "mean",
+                                            "Impute with Median" = "median",
+                                            "Impute with Mode" = "mode"),
+                                selected = "remove")
+                 ),
+                 
+                 # 1.3.3 Handle outliers
+                 checkboxInput("handleOutliers", "Handle Outliers", value = FALSE),
+                 conditionalPanel(
+                   condition = "input.handleOutliers == true",
+                   radioButtons("outlierMethod", label = NULL,
+                                choices = c("Z-score" = "zscore", "IQR" = "iqr"),
+                                selected = "zscore")
+                 ),
+                 
+                 # 1.3.4 Normalize numerical data
+                 checkboxInput("normalizeData", "Normalize Numerical Features", value = FALSE),
+                 
+                 # 1.3.5 Encode categorical variables (One-Hot Encoding or Label Encoding)
+                 checkboxInput("encodeCategorical", "Encode Categorical Variables", value = FALSE),
+                 
+                 # 1.3.6 Clean data button
                  actionButton("clean", "Clean Data")
                ),
-               mainPanel(DTOutput("cleanPreview"))
+               
+               mainPanel(
+                 h4("Preview: Before & After Cleaning"),
+                 tabsetPanel(
+                   tabPanel("Before Cleaning", DTOutput("beforeCleanPreview")),
+                   tabPanel("After Cleaning", DTOutput("cleanPreview"))
+                 )
+               )
              )),
              
              # 1.4 Feature Engineering Part
@@ -114,7 +149,7 @@ ui <- fluidPage(
 server <- function(input, output, session) {
   rv <- reactiveValues(data = NULL, cleaned = NULL)
   
-  # 2.1 Load dataset based on user selection
+  # 2.1 Data Load Server
   observeEvent(input$loadData, {
     if (input$dataSource == "upload") {
       req(input$file)
@@ -131,22 +166,76 @@ server <- function(input, output, session) {
     }
   })
   
-  # 2.2 Output the data preview and structure
   output$dataPreview <- renderDT({ req(rv$data); datatable(rv$data) })
   output$dataStructure <- renderPrint({ req(rv$data); str(rv$data) })
   
-  # 2.3 Data Cleaning
+  # 2.3 Data Cleaning & Preprocessing Server
   observeEvent(input$clean, {
     req(rv$data)
     data <- rv$data
-    if (input$removeDup) data <- distinct(data)
-    if (input$missOpt == "remove") data <- na.omit(data)
-    else data <- data %>% mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+    
+    # Remove duplicate values
+    if (input$removeDup) {
+      data <- distinct(data)
+    }
+    
+    # Handle missing values
+    if (input$handleMissing) {
+      if (input$missOpt == "remove") {
+        data <- na.omit(data)
+      } else if (input$missOpt == "mean") {
+        data <- data %>% mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+      } else if (input$missOpt == "median") {
+        data <- data %>% mutate(across(where(is.numeric), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)))
+      } else if (input$missOpt == "mode") {
+        Mode <- function(x) { ux <- unique(x); ux[which.max(tabulate(match(x, ux)))] }
+        data <- data %>% mutate(across(where(is.character), ~ ifelse(is.na(.), Mode(.), .)))
+      }
+    }
+    
+    # Handle outliers
+    if (input$handleOutliers) {
+      if (input$outlierMethod == "zscore") {
+        zscore_outliers <- function(x) {
+          z_scores <- (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+          x[abs(z_scores) > 3] <- NA
+          return(x)
+        }
+        data <- data %>% mutate(across(where(is.numeric), zscore_outliers))
+      } else if (input$outlierMethod == "iqr") {
+        iqr_outliers <- function(x) {
+          Q1 <- quantile(x, 0.25, na.rm = TRUE)
+          Q3 <- quantile(x, 0.75, na.rm = TRUE)
+          IQR_value <- Q3 - Q1
+          x[x < (Q1 - 1.5 * IQR_value) | x > (Q3 + 1.5 * IQR_value)] <- NA
+          return(x)
+        }
+        data <- data %>% mutate(across(where(is.numeric), iqr_outliers))
+      }
+    }
+    
+    # Normalize numerical data
+    if (input$normalizeData) {
+      data <- data %>% mutate(across(where(is.numeric), ~ ( . - min(. ,na.rm = TRUE)) / (max(.) - min(.))))
+    }
+    
+    # Encode categorical variables (One-Hot Encoding or Label Encoding)
+    if (input$encodeCategorical) {
+      data <- data %>% mutate(across(where(is.character), as.factor))
+    }
+    
+    # Save cleaned data
     rv$cleaned <- data
+    
+    # Send notification
+    showNotification("Data cleaned successfully", type = "message")
   })
-  output$cleanPreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned) })
   
-  # 2.4 Feature Engineering
+  # Display data before and after cleaning
+  output$beforeCleanPreview <- renderDT({ req(rv$data); datatable(rv$data, options = list(scrollX = TRUE)) })
+  output$cleanPreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned, options = list(scrollX = TRUE)) })
+  
+  # 2.4 Feature Engineering Server
   observeEvent(input$addFeature, {
     req(rv$cleaned, input$newFeatureName, input$newFeatureExpr)
     new_feature <- try(with(rv$cleaned, eval(parse(text = input$newFeatureExpr))), silent = TRUE)
@@ -154,6 +243,10 @@ server <- function(input, output, session) {
   })
   output$featurePreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned) })
 }
+
+  # 2.5 Exploratory Data Analysis Server
+
+  # 2.6 Download & Reset Server
 
 # 3. Run the application
 shinyApp(ui, server)
