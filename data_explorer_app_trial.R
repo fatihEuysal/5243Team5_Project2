@@ -23,7 +23,7 @@ ui <- fluidPage(
              tabPanel("User Guide", fluidRow(
                column(12,
                       h3("Overview"),
-                      p("This web application is designed to provide an interactive and user-friendly platform for data analysis, enabling users to seamlessly upload, clean, preprocess, engineer features, and explore datasets.. It provides an interactive and user-friendly platform for data analysis, allowing users to seamlessly upload, clean, preprocess, engineer features, and explore datasets. The app is designed to support data scientists and analysts by simplifying data handling and visualization."),
+                      p("This web application is designed to provide an interactive and user-friendly platform for data analysis, enabling users to seamlessly upload, clean, preprocess, engineer features, and explore datasets. The app simplifies data handling and visualization for data scientists and analysts."),
                       h4("Key Features:"),
                       tags$ul(
                         tags$li("Upload datasets in various formats (CSV, Excel, JSON, RDS) or use built-in sample datasets"),
@@ -36,7 +36,8 @@ ui <- fluidPage(
                       h4("Navigation:"),
                       p("Use the tabs to navigate between Data Upload, Data Cleaning, Feature Engineering, EDA, and Download sections.")
                )
-             )),
+             ))
+             ,
              
              # 1.2 Data Upload part
              tabPanel("Data Upload", sidebarLayout(
@@ -113,7 +114,7 @@ ui <- fluidPage(
 server <- function(input, output, session) {
   rv <- reactiveValues(data = NULL, cleaned = NULL)
   
-  # 3. Load dataset based on user selection
+  # 2.1 Load dataset based on user selection
   observeEvent(input$loadData, {
     if (input$dataSource == "upload") {
       req(input$file)
@@ -130,11 +131,11 @@ server <- function(input, output, session) {
     }
   })
   
-  # 4. Output the data preview and structure
+  # 2.2 Output the data preview and structure
   output$dataPreview <- renderDT({ req(rv$data); datatable(rv$data) })
   output$dataStructure <- renderPrint({ req(rv$data); str(rv$data) })
   
-  # 5. Data Cleaning
+  # 2.3 Data Cleaning
   observeEvent(input$clean, {
     req(rv$data)
     data <- rv$data
@@ -145,7 +146,7 @@ server <- function(input, output, session) {
   })
   output$cleanPreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned) })
   
-  # 6. Feature Engineering
+  # 2.4 Feature Engineering
   observeEvent(input$addFeature, {
     req(rv$cleaned, input$newFeatureName, input$newFeatureExpr)
     new_feature <- try(with(rv$cleaned, eval(parse(text = input$newFeatureExpr))), silent = TRUE)
@@ -154,5 +155,5 @@ server <- function(input, output, session) {
   output$featurePreview <- renderDT({ req(rv$cleaned); datatable(rv$cleaned) })
 }
 
-# 7. Run the application
+# 3. Run the application
 shinyApp(ui, server)
