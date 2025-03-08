@@ -163,19 +163,28 @@ ui <- fluidPage(
                           selectInput("colorVar", "Select Grouping Variable:", choices = c("None"), selected = "None"),
                           radioButtons("plotType", "Select Chart Type:", 
                                        choices = c("Histogram" = "hist", "Boxplot" = "boxplot", 
-                                                   "Bar Chart" = "bar", "Scatter Plot" = "scatter"), selected = "hist"),
+                                                   "Bar Chart" = "bar", "Scatter Plot" = "scatter", 
+                                                   "Correlation Heatmap" = "heatmap"),
+                                       selected = "hist"),
                           sliderInput("alpha", "Opacity:", min = 0.1, max = 1, value = 0.7),
                           actionButton("plotData", "Generate Plot")
                         ),
                         
                         mainPanel(
                           h4("Data Exploration Visualization"),
-                          plotlyOutput("edaPlot", height = "500px"),
+                          conditionalPanel(
+                            condition = "input.plotType == 'heatmap'", 
+                            plotOutput("heatmapPlot", height = "500px")
+                          ),
+                          conditionalPanel(
+                            condition = "input.plotType != 'heatmap'", 
+                            plotlyOutput("edaPlot", height = "500px")
+                          )
                         )
-                      )
-             )
+                      ))
   )
 )
+
 
 # 2. Define Server logic
 server <- function(input, output, session) {
@@ -376,40 +385,50 @@ output$featureEngPreview <- renderDT({ datatable(rv$featured, options = list(scr
   observeEvent(input$plotData, {
     req(rv$featured, input$xVar, input$plotType)
     
-    # First, check if the colorVar variable is "None". If so, do not set a color mapping.
-    color_mapping <- if (input$colorVar == "None") NULL else input$colorVar
-    
-    # Initialize ggplot
-    p <- ggplot(rv$featured, aes_string(x = input$xVar))
-    
-    # Generate the plot based on the selected chart type
-    if (input$plotType == "hist") {
-      p <- p + geom_histogram(alpha = input$alpha, fill = "blue", bins = 30)
-    } else if (input$plotType == "boxplot") {
-      req(input$yVar)  # Boxplot requires a Y-axis variable
-      if (is.null(color_mapping)) {
-        p <- p + geom_boxplot(aes_string(y = input$yVar))
-      } else {
-        p <- p + geom_boxplot(aes_string(y = input$yVar, fill = color_mapping))
-      }
-    } else if (input$plotType == "bar") {
-      if (is.null(color_mapping)) {
-        p <- p + geom_bar(stat = "count")
-      } else {
-        p <- p + geom_bar(stat = "count", aes_string(fill = color_mapping))
-      }
-    } else if (input$plotType == "scatter") {
-      req(input$yVar)  # Scatter plot requires a Y-axis variable
-      if (is.null(color_mapping)) {
-        p <- p + geom_point(aes_string(y = input$yVar), alpha = input$alpha)
-      } else {
-        p <- p + geom_point(aes_string(y = input$yVar, color = color_mapping), alpha = input$alpha)
-      }
+    #Generate correlation heatmap to interpret the relationship between variables
+    if (input$plotType == "heatmap") {
+      corr_matrix <- cor(select(rv$featured, where(is.numeric)), use = "pairwise.complete.obs")
+      output$heatmapPlot <- renderPlot({
+        ggcorrplot::ggcorrplot(corr_matrix, lab = TRUE, outline.color = "white")
+      })
     }
     
-    # Ensure the plot is rendered on the right side of the page
-    output$edaPlot <- renderPlotly({ ggplotly(p) })
-  })
+    else {
+      # First, check if the colorVar variable is "None". If so, do not set a color mapping.
+      color_mapping <- if (input$colorVar == "None") NULL else input$colorVar
+    
+      # Initialize ggplot
+      p <- ggplot(rv$featured, aes_string(x = input$xVar))
+    
+      # Generate the plot based on the selected chart type
+      if (input$plotType == "hist") {
+        p <- p + geom_histogram(alpha = input$alpha, fill = "blue", bins = 30)
+      } else if (input$plotType == "boxplot") {
+        req(input$yVar)  # Boxplot requires a Y-axis variable
+        if (is.null(color_mapping)) {
+          p <- p + geom_boxplot(aes_string(y = input$yVar))
+        } else {
+          p <- p + geom_boxplot(aes_string(y = input$yVar, fill = color_mapping))
+        }
+      } else if (input$plotType == "bar") {
+        if (is.null(color_mapping)) {
+          p <- p + geom_bar(stat = "count")
+        } else {
+          p <- p + geom_bar(stat = "count", aes_string(fill = color_mapping))
+        }
+      } else if (input$plotType == "scatter") {
+        req(input$yVar)  # Scatter plot requires a Y-axis variable
+        if (is.null(color_mapping)) {
+          p <- p + geom_point(aes_string(y = input$yVar), alpha = input$alpha)
+        } else {
+          p <- p + geom_point(aes_string(y = input$yVar, color = color_mapping), alpha = input$alpha)
+        }
+      }
+    
+      # Ensure the plot is rendered on the right side of the page
+      output$edaPlot <- renderPlotly({ ggplotly(p) })
+      }
+    })
 }
 
   # 2.5 Download & Reset Server
