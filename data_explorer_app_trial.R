@@ -373,23 +373,38 @@ output$featureEngPreview <- renderDT({ datatable(rv$featured, options = list(scr
     updateSelectInput(session, "colorVar", choices = c("None", names(rv$featured)), selected = "None")
   })
   
-  # Listen for the "Generate Plot" button click
   observeEvent(input$plotData, {
     req(rv$featured, input$xVar, input$plotType)
     
-    p <- ggplot(rv$featured, aes_string(x = input$xVar))  # Set X-axis variable
+    # First, check if the colorVar variable is "None". If so, do not set a color mapping.
+    color_mapping <- if (input$colorVar == "None") NULL else input$colorVar
     
-    # Generate the plot based on the selected plot type
+    # Initialize ggplot
+    p <- ggplot(rv$featured, aes_string(x = input$xVar))
+    
+    # Generate the plot based on the selected chart type
     if (input$plotType == "hist") {
       p <- p + geom_histogram(alpha = input$alpha, fill = "blue", bins = 30)
     } else if (input$plotType == "boxplot") {
       req(input$yVar)  # Boxplot requires a Y-axis variable
-      p <- p + geom_boxplot(aes_string(y = input$yVar, fill = input$colorVar))
+      if (is.null(color_mapping)) {
+        p <- p + geom_boxplot(aes_string(y = input$yVar))
+      } else {
+        p <- p + geom_boxplot(aes_string(y = input$yVar, fill = color_mapping))
+      }
     } else if (input$plotType == "bar") {
-      p <- p + geom_bar(stat = "count", aes_string(fill = input$colorVar))
+      if (is.null(color_mapping)) {
+        p <- p + geom_bar(stat = "count")
+      } else {
+        p <- p + geom_bar(stat = "count", aes_string(fill = color_mapping))
+      }
     } else if (input$plotType == "scatter") {
       req(input$yVar)  # Scatter plot requires a Y-axis variable
-      p <- p + geom_point(aes_string(y = input$yVar, color = input$colorVar), alpha = input$alpha)
+      if (is.null(color_mapping)) {
+        p <- p + geom_point(aes_string(y = input$yVar), alpha = input$alpha)
+      } else {
+        p <- p + geom_point(aes_string(y = input$yVar, color = color_mapping), alpha = input$alpha)
+      }
     }
     
     # Ensure the plot is rendered on the right side of the page
