@@ -154,23 +154,26 @@ ui <- fluidPage(
              )),
              
              # 1.5 Exploratory Data Analysis Part
-             tabPanel("Exploratory Data Analysis", sidebarLayout(
-               sidebarPanel(
-                 h4("Select Plot Type"),
-                 radioButtons("plotType", "Plot Type:",
-                              choices = c("Histogram", "Boxplot", "Bar Chart", "Scatter Plot"),
-                              selected = "Histogram"),
-                 uiOutput("varSelectUI"),
-                 actionButton("plotData", "Generate Plot")
-               ),
-               mainPanel(plotlyOutput("edaPlot"), verbatimTextOutput("summaryStats"))
-             )),
-             
-             # 1.6 Download & Reset Part
-             tabPanel("Download & Reset", fluidRow(
-               column(6, downloadButton("downloadData", "Download Processed Data")),
-               column(6, actionButton("reset", "Reset App"))
-             ))
+             tabPanel("Exploratory Data Analysis", 
+                      sidebarLayout(
+                        sidebarPanel(
+                          h4("Select Variables and Parameters"),
+                          selectInput("xVar", "Select X-axis Variable:", choices = NULL),
+                          selectInput("yVar", "Select Y-axis Variable:", choices = NULL, selected = NULL),
+                          selectInput("colorVar", "Select Grouping Variable:", choices = c("None"), selected = "None"),
+                          radioButtons("plotType", "Select Chart Type:", 
+                                       choices = c("Histogram" = "hist", "Boxplot" = "boxplot", 
+                                                   "Bar Chart" = "bar", "Scatter Plot" = "scatter"), selected = "hist"),
+                          sliderInput("alpha", "Opacity:", min = 0.1, max = 1, value = 0.7),
+                          actionButton("plotData", "Generate Plot")
+                        ),
+                        
+                        mainPanel(
+                          h4("Data Exploration Visualization"),
+                          plotlyOutput("edaPlot", height = "500px"),
+                        )
+                      )
+             )
   )
 )
 
@@ -202,7 +205,8 @@ server <- function(input, output, session) {
   # Display Before Clean Preview
   output$beforeCleanPreview <- renderDT({ req(rv$data); datatable(rv$data, options = list(scrollX = TRUE)) })
   
-  # 2.3 Data Cleaning & Preprocessing Server
+  
+  # 2.2 Data Cleaning & Preprocessing Server
   observeEvent(input$clean, {
     req(rv$data)
     data <- rv$data
@@ -270,7 +274,7 @@ server <- function(input, output, session) {
   output$beforeFeatureEngPreview <- renderDT({ datatable(rv$cleaned, options = list(scrollX = TRUE)) })
   
   
-  # 2.4 Feature Engineering Server
+  # 2.3 Feature Engineering Server
   observeEvent(input$applyFeatureEng, {
     req(rv$cleaned)  # Cleaned data
     data <- rv$cleaned  # Start Feature Engineering from cleaned data  
@@ -353,16 +357,47 @@ server <- function(input, output, session) {
     
     # Update Feature Engineering results
     rv$featured <- data
-    output$featureEngPreview <- renderDT({ datatable(rv$featured, options = list(scrollX = TRUE)) })
     
     showNotification("Feature Engineering Applied Successfully", type = "message")
   })
-}
+  
+output$featureEngPreview <- renderDT({ datatable(rv$featured, options = list(scrollX = TRUE)) })
   
 
-  # 2.5 Exploratory Data Analysis Server
+  # 2.4 Exploratory Data Analysis Server
+  # After Feature Engineering is completed, update the variable selection dropdowns
+  observeEvent(rv$featured, {
+    req(rv$featured)
+    updateSelectInput(session, "xVar", choices = names(rv$featured))
+    updateSelectInput(session, "yVar", choices = c("", names(rv$featured)), selected = "")
+    updateSelectInput(session, "colorVar", choices = c("None", names(rv$featured)), selected = "None")
+  })
+  
+  # Listen for the "Generate Plot" button click
+  observeEvent(input$plotData, {
+    req(rv$featured, input$xVar, input$plotType)
+    
+    p <- ggplot(rv$featured, aes_string(x = input$xVar))  # Set X-axis variable
+    
+    # Generate the plot based on the selected plot type
+    if (input$plotType == "hist") {
+      p <- p + geom_histogram(alpha = input$alpha, fill = "blue", bins = 30)
+    } else if (input$plotType == "boxplot") {
+      req(input$yVar)  # Boxplot requires a Y-axis variable
+      p <- p + geom_boxplot(aes_string(y = input$yVar, fill = input$colorVar))
+    } else if (input$plotType == "bar") {
+      p <- p + geom_bar(stat = "count", aes_string(fill = input$colorVar))
+    } else if (input$plotType == "scatter") {
+      req(input$yVar)  # Scatter plot requires a Y-axis variable
+      p <- p + geom_point(aes_string(y = input$yVar, color = input$colorVar), alpha = input$alpha)
+    }
+    
+    # Ensure the plot is rendered on the right side of the page
+    output$edaPlot <- renderPlotly({ ggplotly(p) })
+  })
+}
 
-  # 2.6 Download & Reset Server
+  # 2.5 Download & Reset Server
 
 # 3. Run the application
 shinyApp(ui, server)
