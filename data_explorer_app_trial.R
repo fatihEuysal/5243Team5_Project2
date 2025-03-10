@@ -13,6 +13,10 @@ library(ggplot2)
 library(plotly)    # For interactive plots
 library(lubridate) # Date handling
 library(ggcorrplot) # Correlation plot
+library(rmarkdown)  # For report generation
+library(DBI)        # For database connections
+library(shinyWidgets)  # For enhanced UI elements
+
 
 
 # 1. Define UI
@@ -39,8 +43,7 @@ ui <- fluidPage(
                       h4("Navigation:"),
                       p("Use the tabs to navigate between Data Upload, Data Cleaning, Feature Engineering, EDA, and Download sections.")
                )
-             ))
-             ,
+             )),
              
              # 1.2 Data Upload part
              tabPanel("Data Upload", sidebarLayout(
@@ -184,10 +187,46 @@ ui <- fluidPage(
                             plotlyOutput("edaPlot", height = "500px")
                           )
                         )
-                      ))
+                      )),
+             
+             # 1.6 Download Data Tab
+             tabPanel("Download Data", fluidRow(
+               column(12,
+                      h4("Download Processed Data"),
+                      p("Download your processed dataset in different formats."),
+                      selectInput("downloadFormat", "Select Format:",
+                                  choices = c("CSV", "Excel", "RDS"), selected = "CSV"),
+                      downloadButton("downloadData", "Download"),
+                      hr(),
+                      h4("Save/Export Analysis Report"),
+                      selectInput("reportFormat", "Select Format:",
+                                  choices = c("HTML", "PDF"), selected = "HTML"),
+                      downloadButton("downloadReport", "Generate Report")
+               )
+             ))
+  ),
+  
+  # Add Reset button and error handling outside of navbarPage
+  fluidRow(
+    column(12,
+           actionButton("resetApp", "Reset Application", class = "btn-danger")
+    )
   )
 )
 
+# Add global error handling
+options(shiny.error = function() {
+  # Log the error for debugging
+  write(conditionMessage(attr(last.dump, "error")), file = "error_log.txt", append = TRUE)
+  
+  # Display a user-friendly error message
+  showModal(modalDialog(
+    title = "Error",
+    "An error occurred. Please check your inputs or try reloading the application.",
+    easyClose = TRUE,
+    footer = NULL
+  ))
+})
 
 # 2. Define Server logic
 server <- function(input, output, session) {
@@ -432,9 +471,59 @@ output$featureEngPreview <- renderDT({ datatable(rv$featured, options = list(scr
       output$edaPlot <- renderPlotly({ ggplotly(p) })
       }
     })
-}
+
 
   # 2.5 Download & Reset Server
-
+  output$downloadData <- downloadHandler(
+    filename = function() {
+      paste("processed_data_", Sys.Date(), switch(input$downloadFormat,
+                                                  "CSV" = ".csv",
+                                                  "Excel" = ".xlsx",
+                                                  "RDS" = ".rds"), sep = "")
+    },
+    content = function(file) {
+      # Determine which dataset to download
+      data_to_download <- rv$featured
+      if (is.null(data_to_download)) {
+        data_to_download <- rv$cleaned
+      }
+      if (is.null(data_to_download)) {
+        data_to_download <- rv$data
+      }
+      
+      req(data_to_download)
+      
+      switch(input$downloadFormat,
+             "CSV" = write.csv(data_to_download, file, row.names = FALSE),
+             "Excel" = write.xlsx(data_to_download, file),
+             "RDS" = saveRDS(data_to_download, file))
+    }
+  )
+  
+  # 2.6 Reset functionality
+  observeEvent(input$resetApp, {
+    # Reset all reactive values
+    rv$data <- NULL
+    rv$cleaned <- NULL
+    rv$featured <- NULL
+    
+    # Reset file input
+    reset("file")
+    
+    # Reset all checkboxes and selections
+    updateRadioButtons(session, "dataSource", selected = "upload")
+    updateCheckboxInput(session, "removeDup", value = TRUE)
+    updateCheckboxInput(session, "handleMissing", value = FALSE)
+    updateCheckboxInput(session, "handleOutliers", value = FALSE)
+    updateCheckboxInput(session, "normalizeData", value = FALSE)
+    updateCheckboxInput(session, "encodeCategorical", value = FALSE)
+    
+    # Show notification
+    showNotification("Application has been reset", type = "message")
+  })
+}
 # 3. Run the application
 shinyApp(ui, server)
+
+# Run with specific host and port
+shiny::runApp('data_explorer_app_trial.R', host = "127.0.0.1", port = 4718)
