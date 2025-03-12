@@ -17,6 +17,9 @@ library(recipes)
 library(caret)
 library(reshape2)
 library(MASS)  # For Box-Cox
+library(rmarkdown)  # For report generation
+library(DBI)        # For database connections
+library(shinyWidgets)
 
 # Sanitize errors so red messages are not shown in the UI
 options(shiny.sanitize.errors = TRUE)
@@ -237,7 +240,6 @@ ui <- fluidPage(
                           h4("Mathematical Transformations"),
                           checkboxGroupInput("mathTransform", "Select Transformations:",
                                              choices = c("Log" = "log", "Square Root" = "sqrt", "Square" = "square", "Box-Cox" = "boxcox", "Power" = "power")),
-                          # Fixed UI blocks for each transformation; they are conditionally shown based on selection.
                           conditionalPanel(
                             condition = "input.mathTransform.indexOf('log') > -1",
                             h5("Transformation: LOG"),
@@ -295,19 +297,24 @@ ui <- fluidPage(
                             ),
                             hr()
                           ),
-                          hr(),
-                          h4("Create Custom Columns"),
+                          h4("Custom Columns & Rename"),
                           numericInput("numCustom", "How many custom columns to create:", value = 0, min = 0, max = 50),
                           uiOutput("customColUI"),
                           hr(),
-                          h4("Rename Columns"),
                           numericInput("numRename", "How many columns to rename:", value = 0, min = 0, step = 1),
                           uiOutput("renameUI"),
                           hr(),
-                          div(style="margin-top:20px;",
-                              actionButton("applyFEAll", "Apply All Feature Engineering Changes", class="btn btn-primary"),
-                              actionButton("resetFE", "Reset Feature Engineering Inputs", class="btn btn-default", style="margin-left:20px;")
-                          )
+                          h4("Additional Feature Engineering"),
+                          checkboxInput("extractTimeFeatures", "Extract Time Features", value = FALSE),
+                          checkboxInput("extractTextFeatures", "Extract Text Features (Word Count, Character Count)", value = FALSE),
+                          checkboxInput("generateStats", "Generate Statistical Features (Mean, Variance, etc.)", value = FALSE),
+                          checkboxGroupInput("featureSelection", "Feature Selection Methods:",
+                                             choices = c("Variance Threshold" = "var_thresh", "Correlation Analysis" = "corr", "Lasso Regularization" = "lasso")),
+                          checkboxGroupInput("dimReduction", "Dimensionality Reduction:",
+                                             choices = c("PCA" = "pca", "LDA" = "lda", "t-SNE" = "tsne")),
+                          hr(),
+                          actionButton("applyFEAll", "Apply All Feature Engineering Changes", class = "btn btn-primary"),
+                          actionButton("resetFE", "Reset Feature Engineering Inputs", class = "btn btn-default", style = "margin-left:20px;")
                         ),
                         mainPanel(
                           div(class = "container",
@@ -318,7 +325,7 @@ ui <- fluidPage(
                       )
              ),
              
-             # ----- Exploratory Data Analysis (EDA) Tab -----
+             # ----- Exploratory Data Analysis Tab -----
              tabPanel("Exploratory Data Analysis",
                       sidebarLayout(
                         sidebarPanel(
@@ -342,7 +349,8 @@ ui <- fluidPage(
                           conditionalPanel(
                             condition = "input.plotType == 'scatter'",
                             selectInput("scatterX", "Select X Variable:", choices = NULL),
-                            selectInput("scatterY", "Select Y Variable:", choices = NULL)
+                            selectInput("scatterY", "Select Y Variable:", choices = NULL),
+                            selectInput("colorVar", "Color by Variable:", choices = c("None", NULL))
                           ),
                           sliderInput("filterRange", "Filter X-axis Range:", min = 0, max = 100, value = c(0, 100)),
                           sliderInput("alpha", "Opacity:", min = 0.1, max = 1, value = 0.7),
@@ -388,7 +396,11 @@ ui <- fluidPage(
 )
 
 server <- function(input, output, session) {
-  rv <- reactiveValues(datasets = list(), cleaned = list(), featured = list())
+  rv <- reactiveValues(
+    datasets = list(),
+    cleaned = list(),
+    featured = list()
+  )
   
   # 1. Data Upload
   observeEvent(input$loadData, {
@@ -554,10 +566,7 @@ server <- function(input, output, session) {
   # When active dataset for FE changes, update numeric column choices for each transformation
   observeEvent(input$activeDatasetFE, {
     safeRun({
-      if (is.null(input$activeDatasetFE) || input$activeDatasetFE == "") return(NULL)
-      output$feVars <- renderPrint({
-        names(rv$cleaned[[input$activeDatasetFE]])
-      })
+      req(input$activeDatasetFE)
       num_cols <- names(rv$cleaned[[input$activeDatasetFE]])[sapply(rv$cleaned[[input$activeDatasetFE]], is.numeric)]
       updateSelectInput(session, "cols_log", choices = num_cols)
       updateSelectInput(session, "cols_sqrt", choices = num_cols)
@@ -603,9 +612,8 @@ server <- function(input, output, session) {
       req(rv$cleaned[[input$activeDatasetFE]])
       data <- rv$cleaned[[input$activeDatasetFE]]
       
-      # Apply mathematical transformations for each selected option
+      # --- Mathematical Transformations --- #
       if (!is.null(input$mathTransform) && length(input$mathTransform) > 0) {
-        # For LOG transformation
         if ("log" %in% input$mathTransform) {
           cols <- input$cols_log
           if (!is.null(cols)) {
@@ -618,7 +626,6 @@ server <- function(input, output, session) {
             }
           }
         }
-        # For SQUARE ROOT transformation
         if ("sqrt" %in% input$mathTransform) {
           cols <- input$cols_sqrt
           if (!is.null(cols)) {
@@ -631,7 +638,6 @@ server <- function(input, output, session) {
             }
           }
         }
-        # For SQUARE transformation
         if ("square" %in% input$mathTransform) {
           cols <- input$cols_square
           if (!is.null(cols)) {
@@ -644,12 +650,10 @@ server <- function(input, output, session) {
             }
           }
         }
-        # For BOX-COX transformation
         if ("boxcox" %in% input$mathTransform) {
           cols <- input$cols_boxcox
           if (!is.null(cols)) {
             for (col in cols) {
-              # Shift column if needed so values are positive
               shift <- if (min(data[[col]], na.rm = TRUE) <= 0) abs(min(data[[col]], na.rm = TRUE)) + 1 else 0
               x_shifted <- data[[col]] + shift
               lambda <- input$lambda_boxcox
@@ -665,7 +669,6 @@ server <- function(input, output, session) {
             }
           }
         }
-        # For POWER transformation
         if ("power" %in% input$mathTransform) {
           cols <- input$cols_power
           if (!is.null(cols)) {
@@ -681,7 +684,7 @@ server <- function(input, output, session) {
         }
       }
       
-      # Custom Column Creation (dynamic)
+      # --- Custom Column Creation --- #
       if (!is.null(input$numCustom) && as.integer(input$numCustom) > 0) {
         numCustom <- as.integer(input$numCustom)
         for (i in seq_len(numCustom)) {
@@ -700,7 +703,7 @@ server <- function(input, output, session) {
         }
       }
       
-      # Rename Columns (dynamic)
+      # --- Rename Columns --- #
       if (!is.null(input$numRename) && as.integer(input$numRename) > 0) {
         numRename <- as.integer(input$numRename)
         for (i in seq_len(numRename)) {
@@ -716,8 +719,84 @@ server <- function(input, output, session) {
         }
       }
       
+      # --- Additional Feature Engineering --- #
+      # Extract Time Features
+      if (isTRUE(input$extractTimeFeatures)) {
+        date_cols <- names(data)[sapply(data, lubridate::is.Date)]
+        if (length(date_cols) > 0) {
+          for (col in date_cols) {
+            data[[paste0(col, "_year")]] <- lubridate::year(data[[col]])
+            data[[paste0(col, "_month")]] <- lubridate::month(data[[col]])
+            data[[paste0(col, "_day")]] <- lubridate::day(data[[col]])
+            data[[paste0(col, "_weekday")]] <- lubridate::wday(data[[col]], label = TRUE)
+          }
+        }
+      }
+      
+      # Extract Text Features
+      if (isTRUE(input$extractTextFeatures)) {
+        text_cols <- names(data)[sapply(data, is.character)]
+        if (length(text_cols) > 0) {
+          for (col in text_cols) {
+            data[[paste0(col, "_word_count")]] <- str_count(data[[col]], "\\S+")
+            data[[paste0(col, "_char_count")]] <- nchar(data[[col]])
+          }
+        }
+      }
+      
+      # Generate Statistical Features
+      if (isTRUE(input$generateStats)) {
+        num_cols <- names(data)[sapply(data, is.numeric)]
+        if (length(num_cols) > 0) {
+          for (col in num_cols) {
+            data[[paste0(col, "_mean")]] <- mean(data[[col]], na.rm = TRUE)
+            data[[paste0(col, "_var")]] <- var(data[[col]], na.rm = TRUE)
+            data[[paste0(col, "_median")]] <- median(data[[col]], na.rm = TRUE)
+            data[[paste0(col, "_min")]] <- min(data[[col]], na.rm = TRUE)
+            data[[paste0(col, "_max")]] <- max(data[[col]], na.rm = TRUE)
+          }
+        }
+      }
+      
+      # Feature Selection Methods
+      if (!is.null(input$featureSelection)) {
+        if ("var_thresh" %in% input$featureSelection) {
+          variances <- apply(select(data, where(is.numeric)), 2, var, na.rm = TRUE)
+          low_var_cols <- names(variances[variances <= 0.01])
+          if(length(low_var_cols) > 0) {
+            data <- data %>% select(-all_of(low_var_cols))
+          }
+        }
+        if ("corr" %in% input$featureSelection) {
+          corr_matrix <- cor(select(data, where(is.numeric)), use = "pairwise.complete.obs")
+          high_corr <- caret::findCorrelation(corr_matrix, cutoff = 0.8)
+          if(length(high_corr) > 0) {
+            data <- data[ , -high_corr, drop = FALSE]
+          }
+        }
+        if ("lasso" %in% input$featureSelection) {
+          showNotification("Lasso Regularization is not implemented in this demo.", type = "warning")
+        }
+      }
+      
+      # Dimensionality Reduction
+      if (!is.null(input$dimReduction)) {
+        if ("pca" %in% input$dimReduction) {
+          pca_result <- prcomp(select(data, where(is.numeric)), scale. = TRUE)
+          pca_df <- as.data.frame(pca_result$x[, 1:2])
+          colnames(pca_df) <- c("PCA_1", "PCA_2")
+          data <- cbind(data, pca_df)
+        }
+        if ("lda" %in% input$dimReduction) {
+          showNotification("LDA is not implemented in this demo.", type = "warning")
+        }
+        if ("t-sne" %in% input$dimReduction) {
+          showNotification("t-SNE is not implemented in this demo.", type = "warning")
+        }
+      }
+      
       rv$featured[[input$activeDatasetFE]] <- data
-      showNotification("All Feature Engineering Changes Applied Successfully", type = "message")
+      showNotification("Feature Engineering Changes Applied Successfully", type = "message")
       output$featureEngPreview <- renderDT({
         datatable(data, options = list(scrollX = TRUE, scrollY = "300px", paging = TRUE, pageLength = 10))
       })
@@ -726,33 +805,23 @@ server <- function(input, output, session) {
   
   observeEvent(input$resetFE, {
     updateCheckboxGroupInput(session, "mathTransform", selected = character(0))
-    updateSelectInput(session, "selectedNumCols", selected = character(0))
-    updateCheckboxInput(session, "roundMath", value = FALSE)
-    updateNumericInput(session, "roundDigitsMath", value = 2)
     updateNumericInput(session, "numCustom", value = 0)
-    output$customColUI <- renderUI({
-      numericInput("numCustom", "How many custom columns to create:", value = 0, min = 0, max = 50)
-    })
+    output$customColUI <- renderUI({ NULL })
     updateNumericInput(session, "numRename", value = 0)
-    output$renameUI <- renderUI({
-      numericInput("numRename", "How many columns to rename:", value = 0, min = 0, step = 1)
-    })
+    output$renameUI <- renderUI({ NULL })
+    updateCheckboxInput(session, "extractTimeFeatures", value = FALSE)
+    updateCheckboxInput(session, "extractTextFeatures", value = FALSE)
+    updateCheckboxInput(session, "generateStats", value = FALSE)
+    updateCheckboxGroupInput(session, "featureSelection", selected = character(0))
+    updateCheckboxGroupInput(session, "dimReduction", selected = character(0))
     showNotification("Feature Engineering inputs reset", type = "message")
-  })
-  
-  output$feVars <- renderPrint({
-    safeRun({
-      req(rv$cleaned[[input$activeDatasetFE]])
-      names(rv$cleaned[[input$activeDatasetFE]])
-    })
   })
   
   # 4. Exploratory Data Analysis
   # Use checkbox "Include Feature Engineered Columns" to choose dataset for EDA
   observeEvent(input$activeDatasetEDA, {
     safeRun({
-      if (is.null(input$activeDatasetEDA) || input$activeDatasetEDA == "") return(NULL)
-      # Use rv$featured if includeFE is checked and available; otherwise use rv$cleaned
+      req(input$activeDatasetEDA)
       data <- if (isTRUE(input$includeFE) && !is.null(rv$featured[[input$activeDatasetEDA]])) {
         rv$featured[[input$activeDatasetEDA]]
       } else {
@@ -770,8 +839,7 @@ server <- function(input, output, session) {
   
   observe({
     safeRun({
-      if (is.null(input$activeDatasetEDA) || input$activeDatasetEDA == "" ||
-          is.null(input$histVar) || input$histVar == "") return(NULL)
+      req(input$activeDatasetEDA, input$histVar)
       data <- if (isTRUE(input$includeFE) && !is.null(rv$featured[[input$activeDatasetEDA]])) {
         rv$featured[[input$activeDatasetEDA]]
       } else {
@@ -812,8 +880,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$plotData, {
     safeRun({
-      req(rv$featured[[input$activeDatasetEDA]], input$plotType)
-      # Choose dataset for plotting based on includeFE checkbox
+      req(input$plotType)
       data <- if (isTRUE(input$includeFE) && !is.null(rv$featured[[input$activeDatasetEDA]])) {
         rv$featured[[input$activeDatasetEDA]]
       } else {
@@ -821,17 +888,14 @@ server <- function(input, output, session) {
       }
       if (input$plotType == "hist") {
         req(input$histVar)
-        filtered_data <- reactive({
-          data %>% filter(between(!!sym(input$histVar), input$filterRange[1], input$filterRange[2]))
-        })
-        p <- ggplot(filtered_data(), aes_string(x = input$histVar)) +
+        filtered_data <- data %>% filter(between(!!sym(input$histVar), input$filterRange[1], input$filterRange[2]))
+        p <- ggplot(filtered_data, aes_string(x = input$histVar)) +
           geom_histogram(alpha = input$alpha, fill = "blue", bins = 30) +
           labs(title = paste("Histogram of", input$histVar))
         output$edaPlot <- renderPlotly({ ggplotly(p) })
       } else if (input$plotType == "boxplot") {
         req(input$boxVars)
-        filtered_data <- reactive({ data })
-        df <- filtered_data()[, input$boxVars, drop = FALSE]
+        df <- data[, input$boxVars, drop = FALSE]
         df_melt <- melt(df)
         p <- ggplot(df_melt, aes(x = variable, y = value, fill = variable)) +
           geom_boxplot(alpha = input$alpha) +
@@ -839,8 +903,7 @@ server <- function(input, output, session) {
         output$edaPlot <- renderPlotly({ ggplotly(p) })
       } else if (input$plotType == "bar") {
         req(input$barVars)
-        filtered_data <- reactive({ data })
-        df <- filtered_data()[, input$barVars, drop = FALSE]
+        df <- data[, input$barVars, drop = FALSE]
         df_melt <- melt(df)
         p <- ggplot(df_melt, aes(x = value, fill = variable)) +
           geom_bar(alpha = input$alpha, position = "dodge") +
@@ -848,18 +911,15 @@ server <- function(input, output, session) {
         output$edaPlot <- renderPlotly({ ggplotly(p) })
       } else if (input$plotType == "scatter") {
         req(input$scatterX, input$scatterY)
-        filtered_data <- reactive({
-          data %>% filter(between(!!sym(input$scatterX), input$filterRange[1], input$filterRange[2]))
-        })
-        p <- ggplot(filtered_data(), aes_string(x = input$scatterX, y = input$scatterY,
-                                                color = if (input$colorVar != "None") input$colorVar else NULL)) +
+        filtered_data <- data %>% filter(between(!!sym(input$scatterX), input$filterRange[1], input$filterRange[2]))
+        p <- ggplot(filtered_data, aes_string(x = input$scatterX, y = input$scatterY,
+                                              color = if (input$colorVar != "None") input$colorVar else NULL)) +
           geom_point(alpha = input$alpha) +
           geom_smooth(method = "lm", se = FALSE) +
           labs(title = paste("Scatter Plot of", input$scatterX, "vs", input$scatterY))
         output$edaPlot <- renderPlotly({ ggplotly(p) })
       } else if (input$plotType == "heatmap") {
-        filtered_data <- reactive({ data })
-        corr_matrix <- cor(select(filtered_data(), where(is.numeric)), use = "pairwise.complete.obs")
+        corr_matrix <- cor(select(data, where(is.numeric)), use = "pairwise.complete.obs")
         output$heatmapPlot <- renderPlot({
           ggcorrplot::ggcorrplot(corr_matrix, lab = TRUE, outline.color = "white")
         })
