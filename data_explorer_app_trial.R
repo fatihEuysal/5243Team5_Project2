@@ -81,6 +81,27 @@ ui <- fluidPage(
       .dataTables_wrapper .dataTables_paginate .paginate_button {
         color: #333333 !important;
       }
+      /* Custom styles for selectize items */
+      .selectize-control.multi .selectize-input [data-value] {
+        padding: 2px 20px 2px 8px !important;
+        position: relative;
+      }
+      .selectize-control.multi .selectize-input [data-value] .remove {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 20px;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-left: 1px solid rgba(0,0,0,0.1);
+        background: rgba(0,0,0,0.05);
+        cursor: pointer;
+      }
+      .selectize-control.multi .selectize-input [data-value] .remove:hover {
+        background: rgba(0,0,0,0.1);
+      }
     "))
   ),
   theme = shinytheme("flatly"),
@@ -125,7 +146,22 @@ ui <- fluidPage(
                             selectizeInput("builtinDataset", "Select built-in dataset(s):",
                                            choices = c("mtcars", "iris", "ToothGrowth"),
                                            multiple = TRUE,
-                                           selected = "mtcars")
+                                           selected = "mtcars",
+                                           options = list(
+                                             plugins = list('remove_button'),
+                                             render = I("{
+                                               item: function(item, escape) {
+                                                 return '<div>' + 
+                                                        (item.label || item.value || item) + 
+                                                        '<span class=\"remove\">×</span></div>';
+                                               },
+                                               option: function(item, escape) {
+                                                 return '<div>' + 
+                                                        (item.label || item.value || item) + 
+                                                        '</div>';
+                                               }
+                                             }")
+                                           ))
                           ),
                           actionButton("loadData", "Load Data"),
                           br(), br(),
@@ -335,6 +371,11 @@ ui <- fluidPage(
                       fluidRow(
                         column(6,
                                selectInput("activeDatasetDL", "Select Dataset to Download:", choices = NULL),
+                               selectInput("downloadFormat", "Select File Format:",
+                                         choices = c("Excel (.xlsx)" = "xlsx",
+                                                   "CSV (.csv)" = "csv",
+                                                   "JSON (.json)" = "json",
+                                                   "RDS (.rds)" = "rds")),
                                downloadButton("downloadData", "Download Processed Data")
                         ),
                         column(6,
@@ -831,12 +872,20 @@ server <- function(input, output, session) {
   
   output$downloadData <- downloadHandler(
     filename = function() {
-      paste("processed_data_", input$activeDatasetDL, "_", Sys.Date(), ".xlsx", sep = "")
+      ext <- input$downloadFormat
+      paste("processed_data_", input$activeDatasetDL, "_", Sys.Date(), ".", ext, sep = "")
     },
     content = function(file) {
       safeRun({
         req(rv$cleaned[[input$activeDatasetDL]])
-        write.xlsx(rv$cleaned[[input$activeDatasetDL]], file)
+        data <- rv$cleaned[[input$activeDatasetDL]]
+        
+        switch(input$downloadFormat,
+               "xlsx" = write.xlsx(data, file),
+               "csv" = write.csv(data, file, row.names = FALSE),
+               "json" = write_json(data, file),
+               "rds" = saveRDS(data, file)
+        )
       })
     }
   )
