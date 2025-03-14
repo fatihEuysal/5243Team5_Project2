@@ -77,7 +77,7 @@ This project is a comprehensive web application built with **R Shiny**. It strea
 
 ## Collaborators
 - Wenbo Liu ( Wenbo0528 )  
-- Fatih Euysal ( fatihEuysal )  
+- Fatih Emre Uysal ( fatihEuysal )  
 - Xiaoying Wang ( XiaoyingWang412 )  
 - Julieta Caroppo ( julieta87 )
 
