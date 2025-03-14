@@ -338,86 +338,122 @@ server <- function(input, output, session) {
   observeEvent(input$loadData, {
     req(input$dataSource)
     
+    # 1) If the data source is an uploaded file
     if (input$dataSource == "upload") {
       req(input$file)
-      data_list <- list()  # Store multiple datasets
+      data_list <- list()
       
-      for (i in 1:nrow(input$file)) {
-        ext <- tolower(tools::file_ext(input$file$name[i]))
-        data <- switch(ext,
-                       csv = read_csv(input$file$datapath[i]),
-                       xlsx = read_excel(input$file$datapath[i]),
-                       
-                       # Handle JSON parsing errors
-                       json = {
-                         json_text <- readLines(input$file$datapath[i], warn = FALSE)  # Read JSON line by line
-                         json_string <- paste(json_text, collapse = "")  # Combine into a complete JSON
-                         json_data <- tryCatch(fromJSON(json_string, flatten = TRUE),
-                                               error = function(e) {
-                                                 showNotification("Invalid JSON format. Attempting to process line-by-line.", type = "warning")
-                                                 tryCatch(
-                                                   do.call(rbind, lapply(json_text, function(line) try(fromJSON(line), silent = TRUE))),
-                                                   error = function(e) NULL
-                                                 )
-                                               })
-                         if (!is.null(json_data) && is.data.frame(json_data)) {
-                           json_data
-                         } else {
-                           showNotification("Failed to process JSON file. Ensure it's a valid table format.", type = "error")
-                           NULL
-                         }
-                       },
-                       
-                       # Handle RDS file format
-                       rds = {
-                         rds_data <- tryCatch(readRDS(input$file$datapath[i]),
-                                              error = function(e) {
-                                                showNotification("Invalid RDS file format.", type = "error")
-                                                NULL
-                                              })
-                         if (!is.null(rds_data) && is.data.frame(rds_data)) {
-                           rds_data
-                         } else {
-                           showNotification("RDS file does not contain a valid data frame.", type = "warning")
-                           NULL
-                         }
-                       },
-                       
-                       { showNotification(paste("Unsupported file type:", ext), type = "error"); next }
-        )
+      # Attempt to parse each uploaded file
+      for (i in seq_len(nrow(input$file))) {
+        fname <- input$file$name[i]
+        ext   <- tolower(tools::file_ext(fname))
+        datap <- input$file$datapath[i]
+        data  <- NULL
         
-        # Store successfully parsed data
+        # Handle different file types based on extensions
+        if (ext == "csv") {
+          data <- read_csv(datap)
+          
+        } else if (ext %in% c("xlsx", "xls")) {
+          data <- read_excel(datap)
+          
+        } else if (ext == "json") {
+          # Try parsing with fromJSON()
+          data <- tryCatch(
+            fromJSON(datap, flatten = TRUE),
+            error = function(e) {
+              # If it fails, attempt line-by-line parsing using stream_in()
+              showNotification(
+                paste("Standard JSON parsing for", fname, "failed. Trying line-by-line parsing."),
+                type = "warning"
+              )
+              con <- file(datap, open = "r")
+              on.exit(close(con), add = TRUE)
+              
+              # Attempt parsing again
+              json_data <- tryCatch(
+                {
+                  out <- stream_in(con, verbose = FALSE)
+                  out
+                },
+                error = function(e2) {
+                  showNotification(
+                    paste("Failed to parse JSON file", fname, "using line-by-line. Invalid JSON format?"),
+                    type = "error"
+                  )
+                  NULL
+                }
+              )
+              json_data
+            }
+          )
+          
+        } else if (ext == "rds") {
+          data <- tryCatch(
+            readRDS(datap),
+            error = function(e) {
+              showNotification(paste("Invalid RDS file format for", fname), type = "error")
+              NULL
+            }
+          )
+        } else {
+          showNotification(paste("Unsupported file type:", ext, "for file:", fname), type = "error")
+          next  # Skip unsupported file types
+        }
+        
+        # Convert parsed data to a data frame (if not NULL)
+        if (!is.null(data) && !is.data.frame(data)) {
+          data <- as.data.frame(data)
+        }
+        
+        # If the data was successfully parsed
         if (!is.null(data)) {
-          data_list[[input$file$name[i]]] <- data
+          data_list[[fname]] <- data
+          # Notify the user that the file was loaded successfully
+          showNotification(
+            paste("File", fname, "loaded successfully!"),
+            type = "message"
+          )
         }
       }
       
-      rv$dataList <- data_list  # Store multiple datasets
+      # Store the successfully parsed datasets
+      rv$dataList <- data_list
+      
+      # If no dataset was successfully loaded, notify the user
+      if (length(data_list) == 0) {
+        showNotification("No valid dataset has been loaded. Please check your files.", type = "error")
+      }
+      
+      # 2) If the data source is a built-in dataset
     } else {
       req(input$builtinDataset)
       data_list <- setNames(lapply(input$builtinDataset, get), input$builtinDataset)
       rv$dataList <- data_list
+      showNotification("Built-in dataset(s) loaded successfully!", type = "message")
     }
     
-    # Update dropdown to allow users to select a dataset for preview
-    updateSelectInput(session, "uploadPreview", choices = names(rv$dataList), selected = names(rv$dataList)[1])
-    
-    showNotification("Data successfully loaded!", type = "message")
+    # If rv$dataList is not empty, update the dropdown menu to allow dataset selection for preview
+    if (length(rv$dataList) > 0) {
+      updateSelectInput(session, "uploadPreview",
+                        choices  = names(rv$dataList),
+                        selected = names(rv$dataList)[1])
+    }
   })
   
-  # Display data preview
+  # Display the uploaded or selected raw dataset
   output$dataPreview <- renderDT({
     req(rv$dataList, input$uploadPreview)
     datatable(rv$dataList[[input$uploadPreview]], options = list(scrollX = TRUE))
   })
   
-  # Display data structure
+  # Display the dataset structure
   output$dataStructure <- renderPrint({
     req(rv$dataList, input$uploadPreview)
     str(rv$dataList[[input$uploadPreview]])
   })
   
-  # Display raw data before cleaning
+  # Display raw dataset in "Before Cleaning" section of the Data Cleaning page
   output$beforeCleanPreview <- renderDT({
     req(rv$dataList, input$uploadPreview)
     datatable(rv$dataList[[input$uploadPreview]], options = list(scrollX = TRUE))
