@@ -299,21 +299,21 @@ ui <- fluidPage(
                         sidebarPanel(
                           h4(strong("Download Processed Data")),
                           
-                          # 选择数据集
+                          # Select dataset
                           selectInput("activeDatasetDL", "Select Dataset to Download:", choices = NULL),
                           
-                          # 选择文件格式
+                          # Select file format
                           selectInput("downloadFormat", "Select File Format:",
                                       choices = c("Excel (.xlsx)" = "xlsx",
                                                   "CSV (.csv)" = "csv",
                                                   "JSON (.json)" = "json",
                                                   "RDS (.rds)" = "rds")),
                           
-                          # 下载按钮
+                          # Download button
                           downloadButton("downloadData", "Download Processed Data"),
                           
-                          # Reset 按钮
-                          hr(),  # 添加一条分割线
+                          # Reset button
+                          hr(),  # Add a horizontal line for separation
                           actionButton("reset", "Reset App", class = "btn-danger")
                         ),
                         
@@ -324,6 +324,7 @@ ui <- fluidPage(
                         )
                       )
              )
+             
              
   )
 )
