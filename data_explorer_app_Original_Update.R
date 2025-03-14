@@ -151,7 +151,7 @@ ui <- fluidPage(
                           checkboxInput("convertNumeric", "Convert numeric-like character columns to numeric", value = FALSE),
                           
                           # 4. Column Management
-                          strong("Column Management"),
+                          strong("Column Management (After doing previous step)"),
                           checkboxInput("removeColumns", "Select Columns to Remove", value = FALSE),
                           conditionalPanel(
                             condition = "input.removeColumns == true",
@@ -160,7 +160,7 @@ ui <- fluidPage(
                           br(),
                           
                           # 5. Execute Cleaning
-                          actionButton("clean", "Clean Data", class = "btn-primary")
+                          actionButton("clean", "Clean Data")
                         ),
                         
                         mainPanel(
@@ -169,6 +169,7 @@ ui <- fluidPage(
                               uiOutput("cleaningSummary"),
                           ),
                           div(class = "container",
+                              h4("Before & After Data Cleaning"),
                               tabsetPanel(
                                 tabPanel("Before Cleaning", DTOutput("beforeCleanPreview", height = "350px")),
                                 tabPanel("After Cleaning", DTOutput("cleanPreview", height = "350px"))
@@ -189,24 +190,31 @@ ui <- fluidPage(
                           selectInput("featureActiveDataset", "Select Active Dataset:", choices = NULL),
                           
                           # Mathematical transformations
-                          checkboxGroupInput("mathTransform", "Mathematical Transformations:",
-                                             choices = c("Log" = "log", "Square Root" = "sqrt", "Square" = "square")),
+                          checkboxGroupInput("mathTransform", "Select Transformations:",
+                                             choices = c("Log" = "log", "Square Root" = "sqrt", "Square" = "square", "Box-Cox" = "boxcox", "Power" = "power")),
                           
                           # Feature selection
                           checkboxGroupInput("featureSelection", "Feature Selection Methods:",
-                                             choices = c("Variance Threshold" = "var_thresh", 
-                                                         "Correlation Analysis" = "corr",
+                                             choices = c("Variance Threshold (0.01)" = "var_thresh", 
+                                                         "Correlation Analysis (>0.8)" = "corr",
                                                          "Lasso Regularization" = "lasso")),
                           
                           # Dimensionality reduction
                           checkboxGroupInput("dimReduction", "Dimensionality Reduction:",
-                                             choices = c("PCA" = "pca", "LDA" = "lda", "t-SNE" = "tsne")),
+                                             choices = c("PCA (2 dimensions)" = "pca", "LDA (2 dimensions)" = "lda")),
                           
                           # Additional feature engineering
                           checkboxGroupInput("additionalFeatureEng", "Additional Feature Engineering:",
                                              choices = c("Extract Time Features" = "time",
                                                          "Extract Text Features" = "text",
                                                          "Generate Statistical Features" = "stats")),
+                          strong("Column Management (After doing previous step)"),
+                          checkboxInput("removeColumnsF", "Select Columns to Remove", value = FALSE),
+                          conditionalPanel(
+                            condition = "input.removeColumnsF == true",
+                            checkboxGroupInput("colsToRemoveF", "Columns to Remove:", choices = NULL)
+                          ),
+
                           
                           br(),
                           actionButton("applyFeatureEng", "Apply Feature Engineering")
@@ -219,10 +227,10 @@ ui <- fluidPage(
                               uiOutput("featureEngineeringSummary")
                           ),
                           div(class = "container",
-                              h4("Preview: Before & After Feature Engineering"),
+                              h4("Before & After Feature Engineering"),
                               tabsetPanel(
-                                tabPanel("Before Feature Engineering", DTOutput("beforeFeatureEngPreview")),
-                                tabPanel("After Feature Engineering", DTOutput("featureEngPreview"))
+                                tabPanel("Before Feature Engineering", DTOutput("beforeFeatureEngPreview", height = "350px")),
+                                tabPanel("After Feature Engineering", DTOutput("featureEngPreview", height = "350px"))
                               )
                           )
                         )
@@ -233,31 +241,90 @@ ui <- fluidPage(
              tabPanel("Exploratory Data Analysis", 
                       sidebarLayout(
                         sidebarPanel(
-                          h4("Select Variables and Parameters"),
-                          selectInput("xVar", "Select X-axis Variable:", choices = NULL),
-                          selectInput("yVar", "Select Y-axis Variable:", choices = NULL, selected = NULL),
-                          selectInput("colorVar", "Select Grouping Variable:", choices = c("None"), selected = "None"),
+                          h4(strong("Exploratory Data Analysis Options")),
+                          
+                          # Select Active Dataset
+                          selectInput("edaActiveDataset", "Select Active Dataset:", choices = NULL),
+                          
+                          # Select Chart Type First
                           radioButtons("plotType", "Select Chart Type:", 
-                                       choices = c("Histogram" = "hist", "Boxplot" = "boxplot", 
-                                                   "Bar Chart" = "bar", "Scatter Plot" = "scatter", 
+                                       choices = c("Histogram" = "hist", "Bar Chart" = "bar", 
+                                                   "Boxplot" = "boxplot", "Scatter Plot" = "scatter", 
                                                    "Correlation Heatmap" = "heatmap"),
                                        selected = "hist"),
+                          
+                          # Dynamic X and Y axis selection based on chart type
+                          conditionalPanel(
+                            condition = "input.plotType != 'heatmap'", 
+                            selectInput("xVar", "Select X-axis Variable:", choices = NULL)
+                          ),
+                          
+                          conditionalPanel(
+                            condition = "input.plotType == 'scatter' || input.plotType == 'boxplot'", 
+                            selectInput("yVar", "Select Y-axis Variable:", choices = NULL, selected = NULL)
+                          ),
+                          
                           sliderInput("alpha", "Opacity:", min = 0.1, max = 1, value = 0.7),
-                          actionButton("plotData", "Generate Plot")
+                          actionButton("plotData", "Generate Plot", class = "btn-primary")
+                        ),
+                        
+                        # Main panel with separate sections for visualization and statistical summary
+                        mainPanel(
+                          div(class = "container",
+                              h4("Data Exploration Visualization"),
+                              conditionalPanel(
+                                condition = "input.plotType == 'heatmap'", 
+                                plotOutput("heatmapPlot", height = "500px")
+                              ),
+                              conditionalPanel(
+                                condition = "input.plotType != 'heatmap'", 
+                                plotlyOutput("edaPlot", height = "500px")
+                              )
+                          ),
+                          
+                          br(),
+                          
+                          div(class = "container",
+                              h4("Statistical Summary"),
+                              uiOutput("statSummary")
+                          )
+                        )
+                      )
+             )
+             ,
+             
+             # 1.6 Download & Reset Tab
+             tabPanel("Download & Reset",
+                      sidebarLayout(
+                        sidebarPanel(
+                          h4(strong("Download Processed Data")),
+                          
+                          # 选择数据集
+                          selectInput("activeDatasetDL", "Select Dataset to Download:", choices = NULL),
+                          
+                          # 选择文件格式
+                          selectInput("downloadFormat", "Select File Format:",
+                                      choices = c("Excel (.xlsx)" = "xlsx",
+                                                  "CSV (.csv)" = "csv",
+                                                  "JSON (.json)" = "json",
+                                                  "RDS (.rds)" = "rds")),
+                          
+                          # 下载按钮
+                          downloadButton("downloadData", "Download Processed Data"),
+                          
+                          # Reset 按钮
+                          hr(),  # 添加一条分割线
+                          actionButton("reset", "Reset App", class = "btn-danger")
                         ),
                         
                         mainPanel(
-                          h4("Data Exploration Visualization"),
-                          conditionalPanel(
-                            condition = "input.plotType == 'heatmap'", 
-                            plotOutput("heatmapPlot", height = "500px")
-                          ),
-                          conditionalPanel(
-                            condition = "input.plotType != 'heatmap'", 
-                            plotlyOutput("edaPlot", height = "500px")
-                          )
+                          h4("Instructions"),
+                          p("Select a dataset and file format to download the processed data."),
+                          p("Click 'Reset App' to clear all uploaded datasets and start fresh.")
                         )
-                      ))
+                      )
+             )
+             
   )
 )
 
@@ -478,11 +545,32 @@ server <- function(input, output, session) {
   
   
   # 2.3 Feature Engineering Server
-  observeEvent(input$applyFeatureEng, {
-    req(rv$cleaned)  # Cleaned data
-    data <- rv$cleaned  # Start Feature Engineering from cleaned data  
+  # Monitor changes in `activeDataset`, update Before Feature Engineering preview, and hide After Feature Engineering
+  observe({
+    req(rv$cleaned, input$featureActiveDataset)
     
-    # Mathematical transformations
+    dataset_name <- input$featureActiveDataset
+    
+    # Before Feature Engineering: Display the cleaned dataset
+    output$beforeFeatureEngPreview <- renderDT({
+      req(rv$cleaned[[dataset_name]])
+      datatable(rv$cleaned[[dataset_name]], options = list(scrollX = TRUE))
+    })
+    
+    # After Feature Engineering: Initialize as empty
+    output$featureEngPreview <- renderDT({
+      datatable(data.frame(), options = list(scrollX = TRUE))
+    })
+  })
+  
+  # Listen for the "Apply Feature Engineering" button
+  observeEvent(input$applyFeatureEng, {
+    req(rv$cleaned, input$featureActiveDataset)
+    
+    dataset_name <- input$featureActiveDataset
+    data <- rv$cleaned[[dataset_name]]  # Retrieve the cleaned dataset
+    
+    # 1. Mathematical transformations
     if (!is.null(input$mathTransform)) {
       if ("log" %in% input$mathTransform) {
         data <- data %>% mutate(across(where(is.numeric), ~ log(. + 1), .names = "log_{.col}"))
@@ -493,139 +581,431 @@ server <- function(input, output, session) {
       if ("square" %in% input$mathTransform) {
         data <- data %>% mutate(across(where(is.numeric), ~ .^2, .names = "square_{.col}"))
       }
-    }
-    
-    # Time feature extraction
-    if (input$extractTimeFeatures) {
-      date_cols <- names(select(data, where(lubridate::is.Date)))
-      if (length(date_cols) > 0) {
-        for (col in date_cols) {
-          data[[paste0(col, "_year")]] <- lubridate::year(data[[col]])
-          data[[paste0(col, "_month")]] <- lubridate::month(data[[col]])
-          data[[paste0(col, "_day")]] <- lubridate::day(data[[col]])
-          data[[paste0(col, "_weekday")]] <- lubridate::wday(data[[col]], label = TRUE)
-        }
-      }
-    }
-    
-    # Text feature extraction
-    if (input$extractTextFeatures) {
-      text_cols <- names(select(data, where(is.character)))
-      if (length(text_cols) > 0) {
-        for (col in text_cols) {
-          data[[paste0(col, "_word_count")]] <- str_count(data[[col]], "\\S+")
-          data[[paste0(col, "_char_count")]] <- nchar(data[[col]])
-        }
-      }
-    }
-    
-    # Statistical features
-    if (input$generateStats) {
-      num_cols <- names(select(data, where(is.numeric)))
-      if (length(num_cols) > 0) {
-        for (col in num_cols) {
-          data[[paste0(col, "_mean")]] <- mean(data[[col]], na.rm = TRUE)
-          data[[paste0(col, "_var")]] <- var(data[[col]], na.rm = TRUE)
-          data[[paste0(col, "_median")]] <- median(data[[col]], na.rm = TRUE)
-          data[[paste0(col, "_min")]] <- min(data[[col]], na.rm = TRUE)
-          data[[paste0(col, "_max")]] <- max(data[[col]], na.rm = TRUE)
-        }
-      }
-    }
-    
-    # Feature selection
-    if (!is.null(input$featureSelection)) {
-      if ("var_thresh" %in% input$featureSelection) {
-        variances <- apply(select(data, where(is.numeric)), 2, var)
-        low_var_cols <- names(variances[variances <= 0.01])
-        data <- select(data, -all_of(low_var_cols))  # Remove low-variance features
+      
+      # Box-Cox transformation
+      if ("boxcox" %in% input$mathTransform) {
+        lambda <- 0.5  # This can be extended to allow user input
+        data <- data %>% mutate(across(where(is.numeric), ~ {
+          x <- . + abs(min(., na.rm = TRUE)) + 1  # Ensure all values are positive
+          if (lambda == 0) log(x) else (x^lambda - 1) / lambda
+        }, .names = "boxcox_{.col}"))
       }
       
-      if ("corr" %in% input$featureSelection) {
-        corr_matrix <- cor(select(data, where(is.numeric)), use = "pairwise.complete.obs")
-        high_corr <- caret::findCorrelation(corr_matrix, cutoff = 0.8)  # Correlation > 0.8
-        data <- data[, -high_corr, drop = FALSE]
+      # Power transformation
+      if ("power" %in% input$mathTransform) {
+        lambda <- 1.5  # This can be extended to allow user input
+        data <- data %>% mutate(across(where(is.numeric), ~ .^lambda, .names = "power_{.col}"))
       }
     }
     
-    # Dimensionality reduction
+    # 2. Additional feature engineering
+    if (!is.null(input$additionalFeatureEng)) {
+      
+      # Extract time features
+      if ("time" %in% input$additionalFeatureEng) {
+        date_cols <- names(data)[sapply(data, lubridate::is.Date)]
+        
+        if (length(date_cols) > 0) {
+          data <- data %>%
+            mutate(across(all_of(date_cols), list(
+              year = ~ lubridate::year(.),
+              month = ~ lubridate::month(.),
+              day = ~ lubridate::day(.),
+              weekday = ~ lubridate::wday(., label = TRUE)
+            ), .names = "{.col}_{.fn}"))
+        } else {
+          showNotification("No date-type columns found for Extract Time Features.", type = "warning")
+        }
+      }
+      
+      # Extract text features
+      if ("text" %in% input$additionalFeatureEng) {
+        text_cols <- names(data)[sapply(data, is.character)]
+        
+        if (length(text_cols) > 0) {
+          data <- data %>%
+            mutate(across(all_of(text_cols), list(
+              word_count = ~ str_count(., "\\S+"),
+              char_count = ~ nchar(.)
+            ), .names = "{.col}_{.fn}"))
+        } else {
+          showNotification("No text-type columns found for Extract Text Features.", type = "warning")
+        }
+      }
+      
+      # Generate statistical features
+      if ("stats" %in% input$additionalFeatureEng) {
+        num_cols <- names(data)[sapply(data, is.numeric)]
+        
+        if (length(num_cols) > 0) {
+          data <- data %>%
+            mutate(across(all_of(num_cols), list(
+              mean = ~ mean(., na.rm = TRUE),
+              var = ~ var(., na.rm = TRUE),
+              median = ~ median(., na.rm = TRUE),
+              min = ~ min(., na.rm = TRUE),
+              max = ~ max(., na.rm = TRUE)
+            ), .names = "{.col}_{.fn}"))
+        } else {
+          showNotification("No numeric columns found for Generate Statistical Features.", type = "warning")
+        }
+      }
+    }
+
+    # 3. Feature Selection
+    if (!is.null(input$featureSelection)) {
+      
+      # Low variance feature selection
+      if ("var_thresh" %in% input$featureSelection) {
+        numeric_features <- data %>% dplyr::select_if(is.numeric)  # Previous code: select(data, where(is.numeric))
+        
+        if (ncol(numeric_features) > 0) {
+          variances <- apply(numeric_features, 2, var, na.rm = TRUE)
+          low_var_cols <- names(variances[variances <= 0.01])  # Set low variance threshold to 0.01
+          if (length(low_var_cols) > 0) {
+            data <- data %>% dplyr::select(-all_of(low_var_cols))  # Remove low variance features
+            showNotification(paste("Removed low variance features:", paste(low_var_cols, collapse = ", ")), type = "message")
+          }
+        }
+      }
+      
+      # Correlation analysis
+      if ("corr" %in% input$featureSelection) {
+        numeric_features <- data %>% dplyr::select_if(is.numeric)  # Previous code: select(data, where(is.numeric))
+        
+        if (ncol(numeric_features) > 1) {
+          corr_matrix <- cor(numeric_features, use = "pairwise.complete.obs")
+          high_corr <- caret::findCorrelation(corr_matrix, cutoff = 0.8)  # Set correlation threshold to 0.8
+          if (length(high_corr) > 0) {
+            removed_corr_features <- colnames(numeric_features)[high_corr]
+            data <- data[, -high_corr, drop = FALSE]  # Remove highly correlated features
+            showNotification(paste("Removed highly correlated features:", paste(removed_corr_features, collapse = ", ")), type = "message")
+          }
+        } else {
+          showNotification("Correlation Analysis requires at least two numeric features.", type = "warning")
+        }
+      }
+      
+      # Lasso logistic regression feature selection (defaults to using the last categorical variable as the target variable)
+      if ("lasso" %in% input$featureSelection) {
+        categorical_vars <- names(data %>% dplyr::select_if(is.factor))
+        numeric_features <- data %>% dplyr::select_if(is.numeric)
+        
+        if (length(categorical_vars) > 0 && ncol(numeric_features) > 1) {
+          target_var <- tail(categorical_vars, 1)  # Default to the last categorical variable
+          x <- as.matrix(numeric_features)
+          y <- as.factor(data[[target_var]])
+          
+          # Select Lasso model family: use "binomial" for binary classification, "multinomial" for multi-class classification
+          lasso_family <- ifelse(length(unique(y)) > 2, "multinomial", "binomial")
+          
+          if (requireNamespace("glmnet", quietly = TRUE)) {
+            lasso_model <- glmnet::cv.glmnet(x, y, family = lasso_family, alpha = 1)
+            selected_features <- coef(lasso_model, s = "lambda.min")  # Get Lasso-selected features
+            
+            # Process Lasso output
+            if (lasso_family == "multinomial") {
+              selected_features <- selected_features[[1]][-1]  # Retrieve Lasso-selected features for all classes
+            } else {
+              selected_features <- selected_features[-1]  # Keep only numerical features
+            }
+            
+            selected_features <- names(selected_features[selected_features != 0])  # Select non-zero weight features
+            if (length(selected_features) > 0) {
+              data <- data %>% dplyr::select(all_of(selected_features), all_of(target_var))  # Keep only Lasso-selected features
+              showNotification(paste("Lasso selected features:", paste(selected_features, collapse = ", ")), type = "message")
+            } else {
+              showNotification("Lasso did not select any features.", type = "warning")
+            }
+          } else {
+            showNotification("Lasso feature selection requires 'glmnet' package.", type = "error")
+          }
+        } else {
+          showNotification("Lasso requires a categorical target variable and at least two numeric features.", type = "warning")
+        }
+      }
+    }
+    
+    
+    # 4. Dimensionality Reduction
     if (!is.null(input$dimReduction)) {
       if ("pca" %in% input$dimReduction) {
-        pca_result <- prcomp(select(data, where(is.numeric)), scale. = TRUE)
-        pca_df <- as.data.frame(pca_result$x[, 1:2])  # Keep only the first 2 principal components
-        colnames(pca_df) <- c("PCA_1", "PCA_2")
-        data <- cbind(data, pca_df)  # Append dimensionality reduction features
+        numeric_data <- data %>% select_if(is.numeric)
+        
+        if (ncol(numeric_data) >= 2) {
+          pca_result <- prcomp(numeric_data, scale. = TRUE)
+          pca_df <- as.data.frame(pca_result$x[, 1:2])  # Retain only the first two principal components
+          colnames(pca_df) <- c("PCA_1", "PCA_2")
+          data <- cbind(data, pca_df)
+        } else {
+          showNotification("PCA requires at least two numeric features and cannot be performed.", type = "error")
+        }
+        
       }
     }
     
-    # Update Feature Engineering results
-    rv$featured <- data
+    if ("lda" %in% input$dimReduction) {
+      categorical_vars <- names(data %>% select_if(is.factor))
+      numeric_data <- data %>% select_if(is.numeric)
+      
+      if (length(categorical_vars) > 0) {
+        target_var <- tail(categorical_vars, 1)  # Default to the last categorical variable
+        
+        if (!is.null(input$ldaTargetVar) && input$ldaTargetVar %in% categorical_vars) {
+          target_var <- input$ldaTargetVar  # Use user-selected target variable if provided
+        }
+        
+        if (ncol(numeric_data) >= 2) {
+          lda_result <- MASS::lda(numeric_data, grouping = data[[target_var]])
+          lda_df <- as.data.frame(predict(lda_result)$x)
+          colnames(lda_df) <- paste0("LDA_", seq_len(ncol(lda_df)))
+          data <- cbind(data, lda_df)
+        } else {
+          showNotification("LDA requires at least two numeric features and cannot be performed.", type = "error")
+        }
+      } else {
+        showNotification("LDA requires at least one categorical target variable, but none were found in the dataset.", type = "error")
+      }
+    }
     
-    showNotification("Feature Engineering Applied Successfully", type = "message")
+    # Remove selected columns
+    if (!is.null(input$colsToRemoveF) && length(input$colsToRemoveF) > 0) {
+      remaining_cols <- setdiff(names(data), input$colsToRemoveF)
+      
+      if (length(remaining_cols) > 0) {
+        data <- data[, remaining_cols, drop = FALSE]  # Keep only non-removed columns
+      } else {
+        showNotification("Cannot remove all columns!", type = "error")
+        return()
+      }
+    }
+    
+    # 5. Update Feature Engineering results
+    rv$featured[[dataset_name]] <- data
+    
+    # 6. Update After Feature Engineering preview
+    output$featureEngPreview <- renderDT({
+      req(rv$featured[[dataset_name]])
+      datatable(rv$featured[[dataset_name]], options = list(scrollX = TRUE))
+    })
+    
+    # 7. Update `colsToRemoveF` checkbox
+    updateCheckboxGroupInput(session, "colsToRemoveF", choices = names(data), selected = NULL)
+    
+    # 8. Update Feature Engineering Summary
+    output$featureEngineeringSummary <- renderUI({
+      req(rv$cleaned, rv$featured, input$featureActiveDataset)
+      
+      original_cols <- names(rv$cleaned[[dataset_name]])
+      engineered_cols <- names(rv$featured[[dataset_name]])
+      added_cols <- setdiff(engineered_cols, original_cols)
+      
+      tags$div(
+        h5("Feature Engineering Summary:"),
+        p(paste("Dataset:", dataset_name)),
+        p(paste("Original Columns:", length(original_cols))),
+        p(paste("New Columns Added:", ifelse(length(added_cols) > 0, paste(added_cols, collapse = ", "), "None")))
+      )
+    })
+    
+    # 9. Notify user
+    showNotification(paste("Feature Engineering applied to:", dataset_name), type = "message")
+    
   })
   
-  output$featureEngPreview <- renderDT({ datatable(rv$featured, options = list(scrollX = TRUE)) })
+  # Monitor `activeDataset` and update the selection dropdown
+  observe({
+    req(rv$cleaned)
+    updateSelectInput(session, "featureActiveDataset", choices = names(rv$cleaned), selected = names(rv$cleaned)[1])
+  })
   
+
   
   # 2.4 Exploratory Data Analysis Server
-  # After Feature Engineering is completed, update the variable selection dropdowns
-  observeEvent(rv$featured, {
-    req(rv$featured)
-    updateSelectInput(session, "xVar", choices = names(rv$featured))
-    updateSelectInput(session, "yVar", choices = c("", names(rv$featured)), selected = "")
-    updateSelectInput(session, "colorVar", choices = c("None", names(rv$featured)), selected = "None")
+  # Monitor changes in `activeDataset` and update variable selection
+  observe({
+    req(rv$featured, input$edaActiveDataset)
+    
+    dataset_name <- input$edaActiveDataset
+    current_data <- rv$featured[[dataset_name]]
+    
+    # Update X and Y variable selection
+    updateSelectInput(session, "xVar", choices = names(current_data), selected = names(current_data)[1])
+    updateSelectInput(session, "yVar", choices = c("", names(current_data)), selected = "")
   })
   
-  observeEvent(input$plotData, {
-    req(rv$featured, input$xVar, input$plotType)
+  # Statistical Summary Section
+  output$statSummary <- renderUI({
+    req(rv$featured, input$edaActiveDataset)
     
-    #Generate correlation heatmap to interpret the relationship between variables
-    if (input$plotType == "heatmap") {
-      corr_matrix <- cor(select(rv$featured, where(is.numeric)), use = "pairwise.complete.obs")
-      output$heatmapPlot <- renderPlot({
-        ggcorrplot::ggcorrplot(corr_matrix, lab = TRUE, outline.color = "white")
-      })
+    dataset_name <- input$edaActiveDataset
+    data <- rv$featured[[dataset_name]]
+    
+    # Select numeric columns
+    numeric_cols <- sapply(data, is.numeric)
+    numeric_data <- data[, numeric_cols, drop = FALSE]
+    
+    # If no numeric columns exist, display a warning message
+    if (ncol(numeric_data) == 0) {
+      return(tags$div(
+        class = "alert alert-warning",
+        "No numeric variables found in the dataset."
+      ))
     }
     
-    else {
-      # First, check if the colorVar variable is "None". If so, do not set a color mapping.
-      color_mapping <- if (input$colorVar == "None") NULL else input$colorVar
+    # Compute statistical summary
+    summary_df <- data.frame(
+      Variable = colnames(numeric_data),
+      Min = sapply(numeric_data, function(x) ifelse(all(is.na(x)), NA, min(x, na.rm = TRUE))),
+      `1st_Qu.` = sapply(numeric_data, function(x) ifelse(all(is.na(x)), NA, quantile(x, probs = 0.25, na.rm = TRUE))),
+      Median = sapply(numeric_data, function(x) ifelse(all(is.na(x)), NA, median(x, na.rm = TRUE))),
+      Mean = sapply(numeric_data, function(x) ifelse(all(is.na(x)), NA, mean(x, na.rm = TRUE))),
+      `3rd_Qu.` = sapply(numeric_data, function(x) ifelse(all(is.na(x)), NA, quantile(x, probs = 0.75, na.rm = TRUE))),
+      Max = sapply(numeric_data, function(x) ifelse(all(is.na(x)), NA, max(x, na.rm = TRUE))),
+      SD = sapply(numeric_data, function(x) ifelse(all(is.na(x)), NA, sd(x, na.rm = TRUE)))
+    )
+    
+    # Convert Variable column to character to prevent formatting issues
+    summary_df$Variable <- as.character(summary_df$Variable)
+    
+    # Format numeric values for better readability
+    summary_df[-1] <- lapply(summary_df[-1], function(x) round(x, 2))
+    
+    # Render table with better styling
+    tags$div(
+      class = "container-fluid",
+      style = "background-color: #f8f9fa; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);",
+      h5("Statistical Summary"),
+      DT::datatable(
+        summary_df,
+        options = list(
+          scrollX = TRUE,
+          pageLength = 10,
+          dom = 't',  # Display only the table without search box, etc.
+          autoWidth = FALSE,
+          columnDefs = list(
+            list(className = 'dt-center', targets = "_all")  # Center align all columns
+          )
+        ),
+        rownames = FALSE
+      )
+    )
+  })
+
+  # Listen for the "Generate Plot" button and create the corresponding plot
+  observeEvent(input$plotData, {
+    req(rv$featured, input$edaActiveDataset, input$plotType)
+    
+    dataset_name <- input$edaActiveDataset
+    data <- rv$featured[[dataset_name]]
+    
+    # Ensure the dataset is not empty
+    req(nrow(data) > 0)
+    
+    # Correlation Heatmap
+    if (input$plotType == "heatmap") {
+      numeric_data <- data %>% dplyr::select_if(is.numeric)
       
-      # Initialize ggplot
-      p <- ggplot(rv$featured, aes_string(x = input$xVar))
+      if (ncol(numeric_data) > 1) {
+        corr_matrix <- cor(numeric_data, use = "pairwise.complete.obs")
+        output$heatmapPlot <- renderPlot({
+          ggcorrplot::ggcorrplot(corr_matrix, 
+                                 lab = TRUE, 
+                                 outline.color = "white",
+                                 title = "Correlation Heatmap")
+        })
+      } else {
+        showNotification("Heatmap requires at least two numeric features.", type = "warning")
+      }
+    } else {
+      # Create the base ggplot
+      p <- ggplot(data, aes_string(x = input$xVar))
       
-      # Generate the plot based on the selected chart type
+      # Histogram
       if (input$plotType == "hist") {
         p <- p + geom_histogram(alpha = input$alpha, fill = "blue", bins = 30)
+        
+        # Boxplot
       } else if (input$plotType == "boxplot") {
-        req(input$yVar)  # Boxplot requires a Y-axis variable
-        if (is.null(color_mapping)) {
-          p <- p + geom_boxplot(aes_string(y = input$yVar))
-        } else {
-          p <- p + geom_boxplot(aes_string(y = input$yVar, fill = color_mapping))
-        }
+        req(input$yVar)  # Requires Y variable
+        p <- p + geom_boxplot(aes_string(y = input$yVar), alpha = input$alpha)
+        
+        # Bar Chart
       } else if (input$plotType == "bar") {
-        if (is.null(color_mapping)) {
-          p <- p + geom_bar(stat = "count")
-        } else {
-          p <- p + geom_bar(stat = "count", aes_string(fill = color_mapping))
-        }
+        p <- p + geom_bar(stat = "count", fill = "blue", alpha = input$alpha)
+        
+        # Scatter Plot
       } else if (input$plotType == "scatter") {
-        req(input$yVar)  # Scatter plot requires a Y-axis variable
-        if (is.null(color_mapping)) {
-          p <- p + geom_point(aes_string(y = input$yVar), alpha = input$alpha)
-        } else {
-          p <- p + geom_point(aes_string(y = input$yVar, color = color_mapping), alpha = input$alpha)
-        }
+        req(input$yVar)  # Requires Y variable
+        p <- p + geom_point(aes_string(y = input$yVar), alpha = input$alpha, color = "blue")
       }
       
-      # Ensure the plot is rendered on the right side of the page
+      # Render the ggplotly chart
       output$edaPlot <- renderPlotly({ ggplotly(p) })
     }
   })
+  
+  # Monitor `edaActiveDataset` and update the selection dropdown
+  observe({
+    req(rv$featured)
+    updateSelectInput(session, "edaActiveDataset", choices = names(rv$featured), selected = names(rv$featured)[1])
+  })
+  
+  
+  
+  # 2.5 Download & Reset Server
+  # Monitor changes in `activeDataset` and update the dataset selection dropdown for downloading
+  observe({
+    req(rv$featured)
+    updateSelectInput(session, "activeDatasetDL", choices = names(rv$featured), selected = names(rv$featured)[1])
+  })
+  
+  # Handle data download logic
+  output$downloadData <- downloadHandler(
+    filename = function() {
+      dataset_name <- input$activeDatasetDL
+      file_ext <- input$downloadFormat
+      
+      paste0(dataset_name, ".", file_ext)
+    },
+    
+    content = function(file) {
+      req(rv$featured, input$activeDatasetDL, input$downloadFormat)
+      
+      dataset_name <- input$activeDatasetDL
+      data <- rv$featured[[dataset_name]]
+      
+      switch(input$downloadFormat,
+             "csv" = write.csv(data, file, row.names = FALSE),
+             "xlsx" = writexl::write_xlsx(data, file),
+             "json" = jsonlite::write_json(data, file, pretty = TRUE, auto_unbox = TRUE),
+             "rds" = saveRDS(data, file)
+      )
+    }
+  )
+  
+  # Monitor Reset button and trigger application reset
+  observeEvent(input$reset, {
+    showModal(modalDialog(
+      title = "Confirm Reset",
+      "Are you sure you want to reset the application? All uploaded and processed datasets will be cleared.",
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirmReset", "Yes, Reset", class = "btn-danger")
+      )
+    ))
+  })
+  
+  # Handle Reset confirmation
+  observeEvent(input$confirmReset, {
+    removeModal()
+    session$reload()
+  })
 }
 
-# 2.5 Download & Reset Server
+
+
+
 
 # 3. Run the application
 shinyApp(ui, server)
