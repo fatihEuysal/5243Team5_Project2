@@ -918,7 +918,14 @@ server <- function(input, output, session) {
         showNotification("Heatmap requires at least two numeric features.", type = "warning")
       }
     } else {
-      # Create the base ggplot
+      # Create the base ggplot and dynamically generate the title
+      plot_title <- switch(input$plotType,
+                           "hist" = paste("Histogram of", input$xVar),
+                           "boxplot" = paste("Boxplot of", input$yVar, "by", input$xVar),
+                           "bar" = paste("Bar Chart of", input$xVar),
+                           "scatter" = paste("Scatter Plot of", input$xVar, "vs", input$yVar),
+                           "")
+      
       p <- ggplot(data, aes_string(x = input$xVar))
       
       # Histogram
@@ -940,7 +947,11 @@ server <- function(input, output, session) {
         p <- p + geom_point(aes_string(y = input$yVar), alpha = input$alpha, color = "blue")
       }
       
-      # Render the ggplotly chart
+      # Add title
+      p <- p + ggtitle(plot_title) +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+      
+      # Render ggplotly chart
       output$edaPlot <- renderPlotly({ ggplotly(p) })
     }
   })
