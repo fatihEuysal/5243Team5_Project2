@@ -347,12 +347,48 @@ server <- function(input, output, session) {
         data <- switch(ext,
                        csv = read_csv(input$file$datapath[i]),
                        xlsx = read_excel(input$file$datapath[i]),
-                       json = fromJSON(input$file$datapath[i], flatten = TRUE),
-                       rds = readRDS(input$file$datapath[i]),
+                       
+                       # Handle JSON parsing errors
+                       json = {
+                         json_text <- readLines(input$file$datapath[i], warn = FALSE)  # Read JSON line by line
+                         json_string <- paste(json_text, collapse = "")  # Combine into a complete JSON
+                         json_data <- tryCatch(fromJSON(json_string, flatten = TRUE),
+                                               error = function(e) {
+                                                 showNotification("Invalid JSON format. Attempting to process line-by-line.", type = "warning")
+                                                 tryCatch(
+                                                   do.call(rbind, lapply(json_text, function(line) try(fromJSON(line), silent = TRUE))),
+                                                   error = function(e) NULL
+                                                 )
+                                               })
+                         if (!is.null(json_data) && is.data.frame(json_data)) {
+                           json_data
+                         } else {
+                           showNotification("Failed to process JSON file. Ensure it's a valid table format.", type = "error")
+                           NULL
+                         }
+                       },
+                       
+                       # Handle RDS file format
+                       rds = {
+                         rds_data <- tryCatch(readRDS(input$file$datapath[i]),
+                                              error = function(e) {
+                                                showNotification("Invalid RDS file format.", type = "error")
+                                                NULL
+                                              })
+                         if (!is.null(rds_data) && is.data.frame(rds_data)) {
+                           rds_data
+                         } else {
+                           showNotification("RDS file does not contain a valid data frame.", type = "warning")
+                           NULL
+                         }
+                       },
+                       
                        { showNotification(paste("Unsupported file type:", ext), type = "error"); next }
         )
+        
+        # Store successfully parsed data
         if (!is.null(data)) {
-          data_list[[input$file$name[i]]] <- data  # Store dataset in list with filename as the key
+          data_list[[input$file$name[i]]] <- data
         }
       }
       
@@ -363,7 +399,7 @@ server <- function(input, output, session) {
       rv$dataList <- data_list
     }
     
-    # Update dropdown menu (allow users to select the dataset for preview)
+    # Update dropdown to allow users to select a dataset for preview
     updateSelectInput(session, "uploadPreview", choices = names(rv$dataList), selected = names(rv$dataList)[1])
     
     showNotification("Data successfully loaded!", type = "message")
@@ -386,6 +422,8 @@ server <- function(input, output, session) {
     req(rv$dataList, input$uploadPreview)
     datatable(rv$dataList[[input$uploadPreview]], options = list(scrollX = TRUE))
   })
+
+  
   
   
 
