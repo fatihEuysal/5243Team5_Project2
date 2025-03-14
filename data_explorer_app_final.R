@@ -84,7 +84,7 @@ ui <- fluidPage(
                               selected = "upload"),
                  conditionalPanel(
                    condition = "input.dataSource == 'upload'",
-                   fileInput("file", "Choose dataset file(s):",
+                   fileInput("file", "Choose dataset file(s) (Supports: .csv, .xlsx, .json, .rds):",
                              accept = c(".csv", ".xlsx", ".json", ".rds"),
                              multiple = TRUE)
                  ),
