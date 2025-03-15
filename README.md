@@ -8,6 +8,8 @@ This project is a comprehensive web application built with **R Shiny**. It strea
 ## Code & Tools Used
 - **Programming Language**: R  
 - **Core Shiny App**: [data_explorer_app_final.R](./data_explorer_app_final.R)
+- **Application Link**: https://stat5243team5.shinyapps.io/r_app/
+
 
 ## Instructions
 1. **Clone or download** this repository to your local machine.
